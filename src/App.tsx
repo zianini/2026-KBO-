@@ -23,6 +23,7 @@ import {
   onSnapshot, 
   addDoc, 
   updateDoc, 
+  deleteDoc,
   doc, 
   setDoc,
   orderBy,
@@ -417,9 +418,25 @@ function AppContent() {
   };
 
   const approvePrediction = async (pred: Prediction) => {
-    await updateDoc(doc(db, 'predictions', pred.id), {
-      status: 'approved'
-    });
+    try {
+      await updateDoc(doc(db, 'predictions', pred.id), {
+        status: 'approved'
+      });
+    } catch (e) {
+      console.error(e);
+      alert("승인 처리 중 오류가 발생했습니다.");
+    }
+  };
+
+  const rejectPrediction = async (pred: Prediction) => {
+    if (confirm(`${pred.name}님의 예측을 반려하시겠습니까?`)) {
+      try {
+        await deleteDoc(doc(db, 'predictions', pred.id));
+      } catch (e) {
+        console.error(e);
+        alert("반려 처리 중 오류가 발생했습니다.");
+      }
+    }
   };
 
   const parseAdminRankings = (text: string) => {
@@ -612,14 +629,37 @@ function AppContent() {
                   </h2>
                   <span className="text-xs text-zinc-500">관리자 업데이트 기준</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {currentRankings.map((id, idx) => {
                     const team = getTeam(id);
                     return (
-                      <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-zinc-800 border border-zinc-700">
-                        <span className="w-6 text-center font-bold text-zinc-500">{idx + 1}</span>
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team?.color }} />
-                        <span className="font-bold text-white">{team?.name}</span>
+                      <div 
+                        key={id} 
+                        className="relative overflow-hidden flex items-center gap-4 p-4 rounded-2xl bg-zinc-800/50 border border-zinc-700/50 group hover:border-zinc-500 transition-all"
+                      >
+                        {/* Team Color Accent */}
+                        <div 
+                          className="absolute left-0 top-0 bottom-0 w-1.5 opacity-80 group-hover:w-2 transition-all" 
+                          style={{ backgroundColor: team?.color }} 
+                        />
+                        
+                        <span className="text-2xl font-black text-zinc-600 w-8 text-center italic">
+                          {idx + 1}
+                        </span>
+                        
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-zinc-500 uppercase tracking-tighter mb-0.5">
+                            {team?.id}
+                          </span>
+                          <span className="font-black text-lg text-white tracking-tight">
+                            {team?.name}
+                          </span>
+                        </div>
+
+                        {/* Subtle background logo/text effect */}
+                        <div className="absolute right-2 -bottom-2 opacity-[0.03] pointer-events-none select-none">
+                          <span className="text-6xl font-black italic">{team?.short}</span>
+                        </div>
                       </div>
                     );
                   })}
@@ -807,30 +847,45 @@ function AppContent() {
                 
                 <div className="space-y-4">
                   {pendingPredictions.map(pred => (
-                    <div key={pred.id} className="p-4 rounded-xl bg-zinc-800 border border-zinc-700">
-                      <div className="flex justify-between items-start mb-3">
+                    <div key={pred.id} className="p-5 rounded-2xl bg-zinc-800 border border-zinc-700 shadow-lg">
+                      <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
                         <div>
-                          <p className="font-bold text-white">{pred.name}</p>
-                          <p className="text-sm text-zinc-400 italic">"{pred.message}"</p>
+                          <p className="text-lg font-black text-white mb-1">{pred.name}</p>
+                          <p className="text-sm text-zinc-400 italic">"{pred.message || '한마디 없음'}"</p>
                         </div>
-                        <button 
-                          onClick={() => approvePrediction(pred)}
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 transition-all"
-                        >
-                          승인하기
-                        </button>
+                        <div className="flex gap-2 w-full sm:w-auto">
+                          <button 
+                            onClick={() => approvePrediction(pred)}
+                            className="flex-1 sm:flex-none px-6 py-2.5 bg-green-600 text-white rounded-xl text-sm font-black hover:bg-green-700 transition-all shadow-lg shadow-green-900/20"
+                          >
+                            승인하기
+                          </button>
+                          <button 
+                            onClick={() => rejectPrediction(pred)}
+                            className="flex-1 sm:flex-none px-6 py-2.5 bg-red-600/20 text-red-400 border border-red-900/50 rounded-xl text-sm font-black hover:bg-red-600 hover:text-white transition-all"
+                          >
+                            반려하기
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="grid grid-cols-5 gap-1.5">
                         {pred.rankings.map((id, idx) => (
-                          <span key={id} className="text-[10px] px-1.5 py-0.5 bg-zinc-900 rounded border border-zinc-700 text-zinc-300 font-bold">
-                            {idx + 1}.{getTeam(id)?.name.split(' ')[0]}
-                          </span>
+                          <div key={id} className="flex flex-col items-center p-1.5 bg-zinc-900 rounded-lg border border-zinc-700/50">
+                            <span className="text-[10px] font-black text-zinc-500 mb-0.5">{idx + 1}</span>
+                            <div className="w-full h-1 rounded-full mb-1" style={{ backgroundColor: getTeam(id)?.color }} />
+                            <span className="text-[10px] font-bold text-zinc-300 truncate w-full text-center">
+                              {getTeam(id)?.short}
+                            </span>
+                          </div>
                         ))}
                       </div>
                     </div>
                   ))}
                   {pendingPredictions.length === 0 && (
-                    <p className="text-center text-zinc-600 py-8">대기 중인 예측이 없습니다.</p>
+                    <div className="text-center py-12 bg-zinc-800/30 rounded-2xl border border-dashed border-zinc-800">
+                      <Clock size={40} className="mx-auto mb-3 text-zinc-700" />
+                      <p className="text-zinc-600 font-bold">대기 중인 예측이 없습니다.</p>
+                    </div>
                   )}
                 </div>
               </div>
