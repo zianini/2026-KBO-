@@ -50,7 +50,10 @@ import {
   ChevronUp,
   ChevronDown,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  X,
+  Quote,
+  Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -238,6 +241,7 @@ function AppContent() {
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [myPrediction, setMyPrediction] = useState<Prediction | null>(null);
   const [view, setView] = useState<'home' | 'predict' | 'leaderboard' | 'admin'>('home');
+  const [selectedPrediction, setSelectedPrediction] = useState<Prediction | null>(null);
   
   // Prediction Form
   const [predictName, setPredictName] = useState("");
@@ -281,13 +285,23 @@ function AppContent() {
       setUser(u);
       if (u) {
         const userDoc = await getDoc(doc(db, 'users', u.uid));
+        const isAdminEmail = u.email === 'cerenis.injung@gmail.com';
+        
         if (userDoc.exists()) {
-          setProfile(userDoc.data() as UserProfile);
+          const data = userDoc.data() as UserProfile;
+          // If the email matches but the role in DB is 'user', update it to 'admin'
+          if (isAdminEmail && data.role !== 'admin') {
+            const updatedProfile = { ...data, role: 'admin' as const };
+            await updateDoc(doc(db, 'users', u.uid), { role: 'admin' });
+            setProfile(updatedProfile);
+          } else {
+            setProfile(data);
+          }
         } else {
           const newProfile: UserProfile = {
             name: u.displayName || '익명',
             email: u.email || '',
-            role: u.email === 'cerenis.injung@gmail.com' ? 'admin' : 'user'
+            role: isAdminEmail ? 'admin' : 'user'
           };
           await setDoc(doc(db, 'users', u.uid), newProfile);
           setProfile(newProfile);
@@ -346,8 +360,13 @@ function AppContent() {
   }, [profile]);
 
   const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Login failed:", error);
+      alert("로그인에 실패했습니다. 팝업 차단 여부를 확인하거나 다시 시도해주세요.");
+    }
   };
 
   const handleLogout = () => signOut(auth);
@@ -459,6 +478,28 @@ function AppContent() {
             <h1 className="text-2xl font-bold tracking-tight text-white">KBO 2026 순위예측</h1>
           </div>
           <div className="flex items-center gap-4">
+            {profile?.role === 'admin' && (
+              <div className="hidden sm:flex items-center gap-4 mr-4 border-r border-zinc-800 pr-4">
+                <button 
+                  onClick={() => setView('home')}
+                  className={cn("text-sm font-bold transition-colors", view === 'home' ? "text-blue-400" : "text-zinc-500 hover:text-zinc-300")}
+                >
+                  홈
+                </button>
+                <button 
+                  onClick={() => setView('leaderboard')}
+                  className={cn("text-sm font-bold transition-colors", view === 'leaderboard' ? "text-blue-400" : "text-zinc-500 hover:text-zinc-300")}
+                >
+                  리더보드
+                </button>
+                <button 
+                  onClick={() => setView('admin')}
+                  className={cn("text-sm font-bold transition-colors", view === 'admin' ? "text-purple-400" : "text-zinc-500 hover:text-zinc-300")}
+                >
+                  관리
+                </button>
+              </div>
+            )}
             {profile?.role === 'admin' ? (
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium hidden sm:inline text-zinc-400">관리자님</span>
@@ -485,27 +526,47 @@ function AppContent() {
 
       <main className="max-w-4xl mx-auto px-4 py-8">
         {/* Random Quote Section */}
-        <div className="mb-8 text-center h-12 flex items-center justify-center">
-          <AnimatePresence mode="wait">
-            <motion.p
-              key={quote}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="text-lg italic text-gray-600 font-medium"
-            >
-              "{quote}"
-            </motion.p>
-          </AnimatePresence>
+        <div className="mb-12 text-center flex flex-col items-center justify-center bg-zinc-900/50 py-8 px-6 rounded-3xl border border-zinc-800/50 relative overflow-hidden group">
+          <div className="absolute -top-4 -left-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <Trophy size={120} className="text-blue-500 rotate-12" />
+          </div>
+          <div className="absolute -bottom-4 -right-4 opacity-10 group-hover:opacity-20 transition-opacity">
+            <Trophy size={120} className="text-purple-500 -rotate-12" />
+          </div>
+          
+          <div className="relative z-10">
+            <div className="flex justify-center mb-4 items-center gap-4">
+              <div className="w-12 h-1 bg-blue-500 rounded-full" />
+              <Quote size={24} className="text-zinc-600" />
+              <div className="w-12 h-1 bg-blue-500 rounded-full" />
+            </div>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={quote}
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 1.05, y: -10 }}
+                transition={{ type: "spring", stiffness: 100 }}
+                className="max-w-2xl mx-auto"
+              >
+                <p className="text-2xl sm:text-3xl font-black italic text-white tracking-tighter leading-tight drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">
+                  "{quote}"
+                </p>
+              </motion.div>
+            </AnimatePresence>
+            <div className="flex justify-center mt-4">
+              <div className="w-12 h-1 bg-purple-500 rounded-full" />
+            </div>
+          </div>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex bg-white p-1 rounded-xl shadow-sm mb-8">
+        <div className="flex bg-zinc-900 p-1.5 rounded-2xl shadow-2xl mb-12 border border-zinc-800 max-w-md mx-auto">
           <button 
             onClick={() => setView('home')}
             className={cn(
-              "flex-1 py-3 rounded-lg font-bold transition-all",
-              view === 'home' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+              "flex-1 py-3 rounded-xl font-black transition-all text-sm uppercase tracking-widest",
+              view === 'home' ? "bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]" : "text-zinc-500 hover:text-zinc-300"
             )}
           >
             홈
@@ -513,8 +574,8 @@ function AppContent() {
           <button 
             onClick={() => setView('leaderboard')}
             className={cn(
-              "flex-1 py-3 rounded-lg font-bold transition-all",
-              view === 'leaderboard' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+              "flex-1 py-3 rounded-xl font-black transition-all text-sm uppercase tracking-widest",
+              view === 'leaderboard' ? "bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]" : "text-zinc-500 hover:text-zinc-300"
             )}
           >
             리더보드
@@ -523,8 +584,8 @@ function AppContent() {
             <button 
               onClick={() => setView('admin')}
               className={cn(
-                "flex-1 py-3 rounded-lg font-bold transition-all",
-                view === 'admin' ? "bg-purple-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+                "flex-1 py-3 rounded-xl font-black transition-all text-sm uppercase tracking-widest",
+                view === 'admin' ? "bg-purple-600 text-white shadow-[0_0_20px_rgba(147,51,234,0.3)]" : "text-zinc-500 hover:text-zinc-300"
               )}
             >
               관리자
@@ -663,7 +724,11 @@ function AppContent() {
                 <div className="divide-y divide-zinc-800">
                   {predictions.length > 0 ? (
                     predictions.map((pred, idx) => (
-                      <div key={pred.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
+                      <div 
+                        key={pred.id} 
+                        onClick={() => setSelectedPrediction(pred)}
+                        className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors cursor-pointer group"
+                      >
                         <div className="flex items-center gap-4">
                           <span className={cn(
                             "w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm",
@@ -674,8 +739,8 @@ function AppContent() {
                             {idx + 1}
                           </span>
                           <div>
-                            <p className="font-bold text-white">{pred.name}</p>
-                            <p className="text-xs text-zinc-500 truncate max-w-[150px] sm:max-w-xs">{pred.message}</p>
+                            <p className="font-bold text-white group-hover:text-blue-400 transition-colors">{pred.name}</p>
+                            <p className="text-xs text-zinc-500 truncate max-w-[150px] sm:max-w-xs italic">"{pred.message || '화이팅!'}"</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -791,6 +856,79 @@ function AppContent() {
           </button>
         )}
       </div>
+      {/* Prediction Detail Modal */}
+      <AnimatePresence>
+        {selectedPrediction && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-white">{selectedPrediction.name}님의 예측</h3>
+                  <p className="text-sm text-zinc-500 italic">"{selectedPrediction.message || '화이팅!'}"</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedPrediction(null)}
+                  className="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-6 space-y-2 max-h-[60vh] overflow-y-auto">
+                {selectedPrediction.rankings.map((teamId, idx) => {
+                  const team = getTeam(teamId);
+                  const isCorrect = currentRankings[idx] === teamId;
+                  return (
+                    <div 
+                      key={teamId} 
+                      className={cn(
+                        "flex items-center gap-4 p-3 rounded-xl border transition-all",
+                        isCorrect 
+                          ? "bg-zinc-800 border-zinc-700" 
+                          : "bg-zinc-900 border-zinc-800 opacity-40 grayscale"
+                      )}
+                    >
+                      <span className={cn(
+                        "w-8 h-8 flex items-center justify-center rounded-full font-black text-sm",
+                        isCorrect ? "bg-green-500 text-white" : "bg-zinc-800 text-zinc-500"
+                      )}>
+                        {idx + 1}
+                      </span>
+                      <div 
+                        className="w-3 h-3 rounded-full" 
+                        style={{ backgroundColor: isCorrect ? team?.color : '#444' }} 
+                      />
+                      <span className={cn(
+                        "font-bold",
+                        isCorrect ? "text-white" : "text-zinc-500"
+                      )}>
+                        {team?.name}
+                      </span>
+                      {isCorrect && (
+                        <CheckCircle size={16} className="ml-auto text-green-500" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="p-6 bg-zinc-800/50 text-center">
+                <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-1">총 획득 점수</p>
+                <p className="text-4xl font-black text-blue-400">{selectedPrediction.score}점</p>
+              </div>
+              <button 
+                onClick={() => setSelectedPrediction(null)}
+                className="w-full py-4 bg-zinc-800 text-zinc-400 font-bold hover:bg-zinc-700 transition-all border-t border-zinc-700"
+              >
+                닫기
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
