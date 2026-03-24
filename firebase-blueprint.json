@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "user"] }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "Prediction": {
+      "title": "Prediction",
+      "description": "A user's KBO ranking prediction",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "message": { "type": "string" },
+        "rankings": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "score": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "rankings", "status", "userId", "createdAt"]
+    },
+    "CurrentRanking": {
+      "title": "CurrentRanking",
+      "description": "The current official KBO rankings",
+      "type": "object",
+      "properties": {
+        "rankings": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["rankings", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/predictions/{predictionId}": {
+      "schema": "Prediction",
+      "description": "Ranking predictions"
+    },
+    "/settings/currentRanking": {
+      "schema": "CurrentRanking",
+      "description": "Current official rankings"
+    }
+  }
+}

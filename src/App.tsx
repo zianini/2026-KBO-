@@ -1,0 +1,796 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  DndContext, 
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  doc, 
+  setDoc,
+  orderBy,
+  Timestamp,
+  getDoc,
+  getDocs,
+  getDocFromServer
+} from 'firebase/firestore';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { db, auth } from './firebase';
+import { 
+  Trophy, 
+  Send, 
+  CheckCircle, 
+  Clock, 
+  ShieldCheck, 
+  LogOut, 
+  LogIn,
+  ChevronUp,
+  ChevronDown,
+  RefreshCw,
+  AlertCircle
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+// --- Utilities ---
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+// --- Constants ---
+const TEAMS = [
+  { id: 'LG', name: 'LG 트윈스', short: 'LG', color: '#C40026' },
+  { id: 'HANWHA', name: '한화 이글스', short: '한화', color: '#FF6600' },
+  { id: 'SSG', name: 'SSG 랜더스', short: 'SSG', color: '#CE0E2D' },
+  { id: 'SAMSUNG', name: '삼성 라이온즈', short: '삼성', color: '#074CA1' },
+  { id: 'NC', name: 'NC 다이노스', short: 'NC', color: '#00275A' },
+  { id: 'KT', name: 'kt wiz', short: 'KT', color: '#000000' },
+  { id: 'LOTTE', name: '롯데 자이언츠', short: '롯데', color: '#002955' },
+  { id: 'KIA', name: 'KIA 타이거즈', short: 'KIA', color: '#C70125' },
+  { id: 'DOOSAN', name: '두산 베어스', short: '두산', color: '#131230' },
+  { id: 'KIWOOM', name: '키움 히어로즈', short: '키움', color: '#820024' },
+];
+
+const DEFAULT_RANKING = [
+  'LG', 'HANWHA', 'SSG', 'SAMSUNG', 'NC', 'KT', 'LOTTE', 'KIA', 'DOOSAN', 'KIWOOM'
+];
+
+const QUOTES = [
+  "데이터도 포기한 KBO, 작두 타실 분 모집합니다",
+  "9회 말 2아웃까지는 아무도 모르는, 본격 '멘붕' 유발 순위 예측",
+  "슈퍼컴퓨터도 고장 내는 KBO, 제 '뇌피셜' 한 번 믿어보시겠습니까?",
+  "2026 시즌을 꿰뚫어 보는 돗자리 도사들의 성지",
+  "야구 지능(BQ) 총동원! 성지글 예약하는 팩트 기반 망상",
+  "승요(승리요정)가 될 것인가, 역배의 신이 될 것인가",
+  "틀려도 책임 안 짐! 재미로 보는 '내 맘대로' KBO 서열 정리",
+  "KBO 판도 분석: 신의 영역에 도전하기",
+  "성지 순례 예고편: 2026 KBO 서열 예언",
+  "데이터는 거들 뿐, 느낌적인 느낌으로 맞히는 순위",
+  "어차피 우승은 내 팀? 희망 사항 200% 반영된 가상 순위",
+  "야구 몰라요, 하지만 저는 알아요 (아마도)"
+];
+
+// --- Types ---
+interface Prediction {
+  id: string;
+  name: string;
+  message: string;
+  rankings: string[];
+  status: 'pending' | 'approved';
+  score: number;
+  userId: string;
+  createdAt: any;
+}
+
+interface UserProfile {
+  name: string;
+  email: string;
+  role: 'admin' | 'user';
+}
+
+// --- Components ---
+
+interface SortableItemProps {
+  id: string;
+  team: any;
+  index: number;
+  key?: any;
+}
+
+const SortableItem = ({ id, team, index }: SortableItemProps) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    backgroundColor: team?.color || '#ccc',
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="flex items-center justify-between p-4 mb-2 rounded-lg text-white shadow-md cursor-grab active:cursor-grabbing select-none"
+    >
+      <div className="flex items-center gap-4">
+        <span className="text-2xl font-bold opacity-50 w-8">{index + 1}</span>
+        <span className="text-xl font-bold">{team?.name || 'Unknown'}</span>
+      </div>
+      <div className="opacity-50">
+        <RefreshCw size={20} />
+      </div>
+    </div>
+  );
+};
+
+// --- Error Handling ---
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: any;
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+class ErrorBoundary extends (React.Component as any) {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-black p-4">
+          <div className="bg-zinc-900 p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-zinc-800">
+            <AlertCircle className="mx-auto text-red-500 mb-4" size={64} />
+            <h2 className="text-2xl font-bold text-white mb-2">문제가 발생했습니다</h2>
+            <p className="text-zinc-400 mb-6">앱을 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.</p>
+            <pre className="text-xs bg-zinc-800 p-4 rounded-lg overflow-auto text-left mb-6 max-h-40 text-zinc-300">
+              {this.state.error?.message || "알 수 없는 오류"}
+            </pre>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all"
+            >
+              새로고침
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
+
+function AppContent() {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [quote, setQuote] = useState("");
+  const [currentRankings, setCurrentRankings] = useState<string[]>(DEFAULT_RANKING);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [myPrediction, setMyPrediction] = useState<Prediction | null>(null);
+  const [view, setView] = useState<'home' | 'predict' | 'leaderboard' | 'admin'>('home');
+  
+  // Prediction Form
+  const [predictName, setPredictName] = useState("");
+  const [predictMessage, setPredictMessage] = useState("");
+  const [predictRankings, setPredictRankings] = useState<string[]>(DEFAULT_RANKING);
+
+  // Admin State
+  const [pendingPredictions, setPendingPredictions] = useState<Prediction[]>([]);
+  const [adminRankingsText, setAdminRankingsText] = useState("");
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  useEffect(() => {
+    setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+    const timer = setInterval(() => {
+      setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const testConnection = async () => {
+      try {
+        await getDocFromServer(doc(db, 'settings', 'connection_test'));
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration.");
+        }
+      }
+    };
+    testConnection();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        const userDoc = await getDoc(doc(db, 'users', u.uid));
+        if (userDoc.exists()) {
+          setProfile(userDoc.data() as UserProfile);
+        } else {
+          const newProfile: UserProfile = {
+            name: u.displayName || '익명',
+            email: u.email || '',
+            role: u.email === 'cerenis.injung@gmail.com' ? 'admin' : 'user'
+          };
+          await setDoc(doc(db, 'users', u.uid), newProfile);
+          setProfile(newProfile);
+        }
+      } else {
+        setProfile(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    // Fetch Current Official Rankings
+    const unsub = onSnapshot(doc(db, 'settings', 'currentRanking'), (doc) => {
+      if (doc.exists()) {
+        setCurrentRankings(doc.data().rankings);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    // Fetch Approved Predictions for Leaderboard
+    const q = query(collection(db, 'predictions'), where('status', '==', 'approved'), orderBy('score', 'desc'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const preds = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Prediction));
+      setPredictions(preds);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      // Fetch My Prediction
+      const q = query(collection(db, 'predictions'), where('userId', '==', user.uid));
+      const unsub = onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          setMyPrediction({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Prediction);
+        } else {
+          setMyPrediction(null);
+        }
+      });
+      return () => unsub();
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (profile?.role === 'admin') {
+      // Fetch Pending Predictions for Admin
+      const q = query(collection(db, 'predictions'), where('status', '==', 'pending'));
+      const unsub = onSnapshot(q, (snapshot) => {
+        setPendingPredictions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Prediction)));
+      });
+      return () => unsub();
+    }
+  }, [profile]);
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    await signInWithPopup(auth, provider);
+  };
+
+  const handleLogout = () => signOut(auth);
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setPredictRankings((items) => {
+        const oldIndex = items.indexOf(active.id as string);
+        const newIndex = items.indexOf(over.id as string);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
+  const calculateScore = (predicted: string[], actual: string[]) => {
+    let score = 0;
+    predicted.forEach((teamId, index) => {
+      const actualIndex = actual.indexOf(teamId);
+      if (index === actualIndex) {
+        // Exact match: points based on rank (1st = 10, 10th = 1)
+        score += (10 - index);
+      }
+    });
+    return score;
+  };
+
+  const submitPrediction = async () => {
+    try {
+      await addDoc(collection(db, 'predictions'), {
+        name: predictName || "익명",
+        message: predictMessage,
+        rankings: predictRankings,
+        status: 'pending',
+        score: calculateScore(predictRankings, currentRankings),
+        userId: user?.uid || null,
+        createdAt: Timestamp.now()
+      });
+      alert("예측이 제출되었습니다! 관리자의 승인을 기다려주세요.");
+      setPredictName("");
+      setPredictMessage("");
+      setPredictRankings(DEFAULT_RANKING);
+      setView('home');
+    } catch (e) {
+      console.error(e);
+      alert("제출 중 오류가 발생했습니다.");
+    }
+  };
+
+  const approvePrediction = async (pred: Prediction) => {
+    await updateDoc(doc(db, 'predictions', pred.id), {
+      status: 'approved'
+    });
+  };
+
+  const parseAdminRankings = (text: string) => {
+    const lines = text.trim().split('\n');
+    const newRankings: string[] = [];
+    
+    lines.forEach(line => {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const teamName = parts[1];
+        const team = TEAMS.find(t => t.short === teamName || t.name.includes(teamName));
+        if (team && !newRankings.includes(team.id)) {
+          newRankings.push(team.id);
+        }
+      }
+    });
+
+    if (newRankings.length === 10) {
+      return newRankings;
+    }
+    return null;
+  };
+
+  const updateOfficialRankings = async () => {
+    const parsed = parseAdminRankings(adminRankingsText);
+    if (!parsed) {
+      alert("순위 데이터 형식이 올바르지 않습니다. 10개 구단이 모두 포함되어야 합니다.");
+      return;
+    }
+
+    await setDoc(doc(db, 'settings', 'currentRanking'), {
+      rankings: parsed,
+      updatedAt: Timestamp.now()
+    });
+    
+    // Recalculate all scores
+    const allPreds = await getDocs(collection(db, 'predictions'));
+    for (const p of allPreds.docs) {
+      const data = p.data();
+      const newScore = calculateScore(data.rankings, parsed);
+      await updateDoc(doc(db, 'predictions', p.id), { score: newScore });
+    }
+    alert("공식 순위가 업데이트되었습니다.");
+    setAdminRankingsText("");
+  };
+
+  const getTeam = (id: string) => TEAMS.find(t => t.id === id);
+
+  return (
+    <div className="min-h-screen bg-black font-sans text-gray-100 pb-20">
+      {/* Header */}
+      <header className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-50">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
+            <Trophy className="text-yellow-500" size={32} />
+            <h1 className="text-2xl font-bold tracking-tight text-white">KBO 2026 순위예측</h1>
+          </div>
+          <div className="flex items-center gap-4">
+            {profile?.role === 'admin' ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium hidden sm:inline text-zinc-400">관리자님</span>
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 rounded-full hover:bg-zinc-800 text-zinc-400 transition-colors"
+                  title="로그아웃"
+                >
+                  <LogOut size={20} />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={handleLogin}
+                className="p-2 rounded-full hover:bg-zinc-800 text-zinc-500 transition-colors"
+                title="관리자 로그인"
+              >
+                <ShieldCheck size={20} />
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 py-8">
+        {/* Random Quote Section */}
+        <div className="mb-8 text-center h-12 flex items-center justify-center">
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={quote}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="text-lg italic text-gray-600 font-medium"
+            >
+              "{quote}"
+            </motion.p>
+          </AnimatePresence>
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex bg-white p-1 rounded-xl shadow-sm mb-8">
+          <button 
+            onClick={() => setView('home')}
+            className={cn(
+              "flex-1 py-3 rounded-lg font-bold transition-all",
+              view === 'home' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+            )}
+          >
+            홈
+          </button>
+          <button 
+            onClick={() => setView('leaderboard')}
+            className={cn(
+              "flex-1 py-3 rounded-lg font-bold transition-all",
+              view === 'leaderboard' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+            )}
+          >
+            리더보드
+          </button>
+          {profile?.role === 'admin' && (
+            <button 
+              onClick={() => setView('admin')}
+              className={cn(
+                "flex-1 py-3 rounded-lg font-bold transition-all",
+                view === 'admin' ? "bg-purple-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+              )}
+            >
+              관리자
+            </button>
+          )}
+        </div>
+
+        {/* View Content */}
+        <AnimatePresence mode="wait">
+          {view === 'home' && (
+            <motion.div
+              key="home"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-8"
+            >
+              {/* Current Status Card */}
+              <div className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
+                <div className="flex flex-col items-center justify-center mb-6 text-center">
+                  <h2 className="text-xl font-bold flex items-center gap-2 mb-1 text-white">
+                    <CheckCircle className="text-green-500" />
+                    현재 KBO 순위
+                  </h2>
+                  <span className="text-xs text-zinc-500">관리자 업데이트 기준</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {currentRankings.map((id, idx) => {
+                    const team = getTeam(id);
+                    return (
+                      <div key={id} className="flex items-center gap-3 p-3 rounded-xl bg-zinc-800 border border-zinc-700">
+                        <span className="w-6 text-center font-bold text-zinc-500">{idx + 1}</span>
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: team?.color }} />
+                        <span className="font-bold text-white">{team?.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Action Section */}
+              <div className="text-center space-y-4">
+                <button 
+                  onClick={() => setView('predict')}
+                  className="w-full sm:w-auto px-12 py-4 bg-blue-600 text-white rounded-2xl font-black text-xl shadow-lg hover:bg-blue-700 hover:scale-105 transition-all flex items-center justify-center gap-3 mx-auto"
+                >
+                  <Send size={24} />
+                  순위 예측하기
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {view === 'predict' && (
+            <motion.div
+              key="predict"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800"
+            >
+              <h2 className="text-2xl font-bold mb-6 text-center text-white">2026 순위 예측하기</h2>
+              
+              <div className="space-y-6 mb-8">
+                <div>
+                  <label className="block text-sm font-bold text-zinc-400 mb-2">이름</label>
+                  <input 
+                    type="text" 
+                    value={predictName}
+                    onChange={(e) => setPredictName(e.target.value)}
+                    placeholder="리더보드에 표시될 이름"
+                    className="w-full p-3 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-zinc-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-zinc-400 mb-2">관리자에게 보내는 말</label>
+                  <textarea 
+                    value={predictMessage}
+                    onChange={(e) => setPredictMessage(e.target.value)}
+                    placeholder="예측 근거 등 한마디!"
+                    className="w-full p-3 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all h-24 resize-none placeholder:text-zinc-600"
+                  />
+                </div>
+              </div>
+
+              <div className="mb-8">
+                <p className="text-sm text-zinc-500 mb-4 text-center">카드를 드래그하여 순위를 조정하세요.</p>
+                <DndContext 
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext 
+                    items={predictRankings}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {predictRankings.map((id, index) => (
+                      <SortableItem key={id} id={id} team={getTeam(id)} index={index} />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setView('home')}
+                  className="flex-1 py-4 bg-zinc-800 text-zinc-400 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                >
+                  취소
+                </button>
+                <button 
+                  onClick={submitPrediction}
+                  className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg transition-all"
+                >
+                  제출하기
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {view === 'leaderboard' && (
+            <motion.div
+              key="leaderboard"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-4"
+            >
+              <div className="bg-zinc-900 rounded-2xl shadow-xl overflow-hidden border border-zinc-800">
+                <div className="bg-blue-900 p-6 text-white text-center border-b border-blue-800">
+                  <Trophy size={48} className="mx-auto mb-2 text-yellow-400" />
+                  <h2 className="text-2xl font-black">예측 리더보드</h2>
+                  <p className="text-blue-200 text-sm">정확한 순위 예측으로 점수를 획득하세요!</p>
+                </div>
+                
+                <div className="divide-y divide-zinc-800">
+                  {predictions.length > 0 ? (
+                    predictions.map((pred, idx) => (
+                      <div key={pred.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
+                        <div className="flex items-center gap-4">
+                          <span className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm",
+                            idx === 0 ? "bg-yellow-500 text-black" : 
+                            idx === 1 ? "bg-zinc-300 text-black" :
+                            idx === 2 ? "bg-amber-600 text-white" : "bg-zinc-800 text-zinc-500"
+                          )}>
+                            {idx + 1}
+                          </span>
+                          <div>
+                            <p className="font-bold text-white">{pred.name}</p>
+                            <p className="text-xs text-zinc-500 truncate max-w-[150px] sm:max-w-xs">{pred.message}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-black text-blue-400">{pred.score}점</p>
+                          <div className="flex gap-0.5 mt-1">
+                            {pred.rankings.slice(0, 5).map((id) => (
+                              <div key={id} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getTeam(id)?.color }} />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="p-12 text-center text-zinc-600">
+                      <Clock size={48} className="mx-auto mb-4 opacity-20" />
+                      <p>아직 승인된 예측이 없습니다.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {view === 'admin' && (
+            <motion.div
+              key="admin"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="space-y-8"
+            >
+              {/* Official Ranking Update */}
+              <div className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2 text-purple-400">
+                  <ShieldCheck />
+                  공식 순위 업데이트
+                </h2>
+                <p className="text-sm text-zinc-500 mb-4">
+                  KBO 공식 홈페이지의 순위 텍스트를 복사해서 붙여넣으세요.<br/>
+                  예시: 1 롯데 12 8 2 2 0.800 - 1패
+                </p>
+                
+                <textarea 
+                  value={adminRankingsText}
+                  onChange={(e) => setAdminRankingsText(e.target.value)}
+                  placeholder="여기에 순위 데이터를 붙여넣으세요..."
+                  className="w-full p-4 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all h-48 font-mono text-sm mb-4 placeholder:text-zinc-600"
+                />
+
+                <button 
+                  onClick={updateOfficialRankings}
+                  className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition-all shadow-lg"
+                >
+                  텍스트에서 순위 추출 및 업데이트
+                </button>
+              </div>
+
+              {/* Pending Approvals */}
+              <div className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2 text-orange-400">
+                  <Clock />
+                  승인 대기 중인 예측 ({pendingPredictions.length})
+                </h2>
+                
+                <div className="space-y-4">
+                  {pendingPredictions.map(pred => (
+                    <div key={pred.id} className="p-4 rounded-xl bg-zinc-800 border border-zinc-700">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <p className="font-bold text-white">{pred.name}</p>
+                          <p className="text-sm text-zinc-400 italic">"{pred.message}"</p>
+                        </div>
+                        <button 
+                          onClick={() => approvePrediction(pred)}
+                          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 transition-all"
+                        >
+                          승인하기
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {pred.rankings.map((id, idx) => (
+                          <span key={id} className="text-[10px] px-1.5 py-0.5 bg-zinc-900 rounded border border-zinc-700 text-zinc-300 font-bold">
+                            {idx + 1}.{getTeam(id)?.name.split(' ')[0]}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {pendingPredictions.length === 0 && (
+                    <p className="text-center text-zinc-600 py-8">대기 중인 예측이 없습니다.</p>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Footer Navigation (Mobile Style) */}
+      <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 p-2 flex justify-around sm:hidden">
+        <button onClick={() => setView('home')} className={cn("p-2 flex flex-col items-center", view === 'home' ? "text-blue-400" : "text-zinc-600")}>
+          <RefreshCw size={20} />
+          <span className="text-[10px] font-bold">홈</span>
+        </button>
+        <button onClick={() => setView('leaderboard')} className={cn("p-2 flex flex-col items-center", view === 'leaderboard' ? "text-blue-400" : "text-zinc-600")}>
+          <Trophy size={20} />
+          <span className="text-[10px] font-bold">리더보드</span>
+        </button>
+        {profile?.role === 'admin' && (
+          <button onClick={() => setView('admin')} className={cn("p-2 flex flex-col items-center", view === 'admin' ? "text-purple-400" : "text-zinc-600")}>
+            <ShieldCheck size={20} />
+            <span className="text-[10px] font-bold">관리</span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

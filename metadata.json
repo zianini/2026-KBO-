@@ -1,0 +1,5 @@
+{
+  "name": "KBO 2026 순위예측",
+  "description": "KBO 2026 시즌의 순위를 예측하고 리더보드에서 점수를 확인하세요.",
+  "requestFramePermissions": []
+}
