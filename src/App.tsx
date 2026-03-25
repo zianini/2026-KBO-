@@ -162,11 +162,11 @@ const SortableItem = ({ id, team, index }: SortableItemProps) => {
       style={style}
       {...attributes}
       {...listeners}
-      className="flex items-center justify-between p-2 px-4 mb-1.5 rounded-lg text-white shadow-md cursor-grab active:cursor-grabbing select-none w-[50%] sm:w-[30%] mx-auto"
+      className="flex items-center justify-center p-2 px-4 mb-1.5 rounded-lg text-white shadow-md cursor-grab active:cursor-grabbing select-none w-[55%] sm:w-[33%] mx-auto overflow-hidden"
     >
-      <div className="flex items-center gap-4">
-        <span className="text-lg font-bold opacity-50 w-6">{index + 1}</span>
-        <span className="text-base font-bold">{team?.name || 'Unknown'}</span>
+      <div className="flex items-center gap-3 w-full">
+        <span className="text-base font-bold opacity-50 w-5 flex-shrink-0">{index + 1}</span>
+        <span className="text-base font-bold truncate flex-1 text-center pr-5">{team?.short || 'Unknown'}</span>
       </div>
     </div>
   );
