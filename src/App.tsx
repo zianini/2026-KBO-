@@ -162,14 +162,11 @@ const SortableItem = ({ id, team, index }: SortableItemProps) => {
       style={style}
       {...attributes}
       {...listeners}
-      className="flex items-center justify-between p-4 mb-2 rounded-lg text-white shadow-md cursor-grab active:cursor-grabbing select-none"
+      className="flex items-center justify-between p-4 mb-2 rounded-lg text-white shadow-md cursor-grab active:cursor-grabbing select-none w-full sm:w-[60%] mx-auto"
     >
       <div className="flex items-center gap-4">
         <span className="text-2xl font-bold opacity-50 w-8">{index + 1}</span>
         <span className="text-xl font-bold">{team?.name || 'Unknown'}</span>
-      </div>
-      <div className="opacity-50">
-        <Activity size={20} />
       </div>
     </div>
   );
@@ -782,7 +779,7 @@ function AppContent() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800"
+              className="bg-zinc-900 rounded-2xl p-8 shadow-xl border border-zinc-800"
             >
               <h2 className="text-2xl font-bold mb-6 text-center text-white">2026 순위 예측하기</h2>
               
