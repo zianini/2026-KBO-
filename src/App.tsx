@@ -250,6 +250,7 @@ export default function App() {
 function AppContent() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
   const [quote, setQuote] = useState("");
   const [currentRankings, setCurrentRankings] = useState<string[]>(DEFAULT_RANKING);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
@@ -341,6 +342,8 @@ function AppContent() {
         }
       } catch (error) {
         console.error('Auth state change error:', error);
+      } finally {
+        setLoadingAuth(false);
       }
     });
     return () => unsubscribe();
@@ -426,9 +429,17 @@ function AppContent() {
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
+      // Use signInWithPopup but handle potential blocks
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed:", error);
+      if (error.code === 'auth/popup-blocked') {
+        alert("팝업이 차단되었습니다. 브라우저 설정에서 팝업을 허용해 주세요.");
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        // User closed the popup, ignore
+      } else {
+        alert("로그인 중 오류가 발생했습니다: " + error.message);
+      }
     }
   };
 
@@ -583,50 +594,51 @@ function AppContent() {
       <header className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-50">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('home')}>
-            <Trophy className="text-yellow-500" size={32} />
-            <h1 className="text-2xl font-bold tracking-tight text-white">KBO 2026 순위예측</h1>
+            <Trophy className="text-yellow-500 flex-shrink-0" size={28} />
+            <h1 className="text-lg sm:text-2xl font-bold tracking-tight text-white truncate">KBO 2026 순위예측</h1>
           </div>
-          <div className="flex items-center gap-4">
-            {profile?.role === 'admin' && (
-              <div className="hidden sm:flex items-center gap-4 mr-4 border-r border-zinc-800 pr-4">
-                <button 
-                  onClick={() => setView('home')}
-                  className={cn("text-sm font-bold transition-colors", view === 'home' ? "text-blue-400" : "text-zinc-500 hover:text-zinc-300")}
-                >
-                  홈
-                </button>
-                <button 
-                  onClick={() => setView('leaderboard')}
-                  className={cn("text-sm font-bold transition-colors", view === 'leaderboard' ? "text-blue-400" : "text-zinc-500 hover:text-zinc-300")}
-                >
-                  리더보드
-                </button>
-                <button 
-                  onClick={() => setView('admin')}
-                  className={cn("text-sm font-bold transition-colors", view === 'admin' ? "text-purple-400" : "text-zinc-500 hover:text-zinc-300")}
-                >
-                  관리
-                </button>
-              </div>
-            )}
-            {profile?.role === 'admin' ? (
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium hidden sm:inline text-zinc-400">관리자님</span>
+          <div className="flex items-center gap-2 sm:gap-4">
+            {loadingAuth ? (
+              <div className="w-6 h-6 rounded-full border-2 border-zinc-800 border-t-blue-500 animate-spin" />
+            ) : profile?.role === 'admin' ? (
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="hidden md:flex items-center gap-4 mr-4 border-r border-zinc-800 pr-4">
+                  <button 
+                    onClick={() => setView('home')}
+                    className={cn("text-sm font-bold transition-colors", view === 'home' ? "text-blue-400" : "text-zinc-500 hover:text-zinc-300")}
+                  >
+                    홈
+                  </button>
+                  <button 
+                    onClick={() => setView('leaderboard')}
+                    className={cn("text-sm font-bold transition-colors", view === 'leaderboard' ? "text-blue-400" : "text-zinc-500 hover:text-zinc-300")}
+                  >
+                    리더보드
+                  </button>
+                  <button 
+                    onClick={() => setView('admin')}
+                    className={cn("text-sm font-bold transition-colors", view === 'admin' ? "text-purple-400" : "text-zinc-500 hover:text-zinc-300")}
+                  >
+                    관리
+                  </button>
+                </div>
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline text-zinc-400">관리자님</span>
                 <button 
                   onClick={handleLogout}
-                  className="p-2 rounded-full hover:bg-zinc-800 text-zinc-400 transition-colors"
+                  className="p-1.5 sm:p-2 rounded-full hover:bg-zinc-800 text-zinc-400 transition-colors"
                   title="로그아웃"
                 >
-                  <LogOut size={20} />
+                  <LogOut size={18} />
                 </button>
               </div>
             ) : (
               <button 
                 onClick={handleLogin}
-                className="p-2 rounded-full hover:bg-zinc-800 text-zinc-500 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full hover:bg-zinc-800 text-zinc-500 transition-colors border border-zinc-800"
                 title="관리자 로그인"
               >
-                <ShieldCheck size={20} />
+                <ShieldCheck size={16} />
+                <span className="text-[10px] sm:text-xs font-bold">관리자 로그인</span>
               </button>
             )}
           </div>
