@@ -301,32 +301,46 @@ function AppContent() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        const userDoc = await getDoc(doc(db, 'users', u.uid));
-        const isAdminEmail = u.email?.toLowerCase() === 'cerenis.injung@gmail.com';
-        
-        if (userDoc.exists()) {
-          const data = userDoc.data() as UserProfile;
-          // If the email matches but the role in DB is 'user', update it to 'admin'
-          if (isAdminEmail && data.role !== 'admin') {
-            const updatedProfile = { ...data, role: 'admin' as const };
-            await updateDoc(doc(db, 'users', u.uid), { role: 'admin' });
-            setProfile(updatedProfile);
+      try {
+        setUser(u);
+        if (u) {
+          const isAdminEmail = u.email?.toLowerCase() === 'cerenis.injung@gmail.com';
+          const userDocRef = doc(db, 'users', u.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (userDoc.exists()) {
+            const data = userDoc.data() as UserProfile;
+            // If the email matches but the role in DB is 'user', try to update it to 'admin'
+            if (isAdminEmail && data.role !== 'admin') {
+              try {
+                await updateDoc(userDocRef, { role: 'admin' });
+                setProfile({ ...data, role: 'admin' });
+              } catch (e) {
+                console.error('Failed to update admin role in Firestore:', e);
+                // Still set as admin in local state if email matches
+                setProfile({ ...data, role: 'admin' });
+              }
+            } else {
+              setProfile(data);
+            }
           } else {
-            setProfile(data);
+            const newProfile: UserProfile = {
+              name: u.displayName || '익명',
+              email: u.email || '',
+              role: isAdminEmail ? 'admin' : 'user'
+            };
+            try {
+              await setDoc(userDocRef, newProfile);
+            } catch (e) {
+              console.error('Failed to create user profile in Firestore:', e);
+            }
+            setProfile(newProfile);
           }
         } else {
-          const newProfile: UserProfile = {
-            name: u.displayName || '익명',
-            email: u.email || '',
-            role: isAdminEmail ? 'admin' : 'user'
-          };
-          await setDoc(doc(db, 'users', u.uid), newProfile);
-          setProfile(newProfile);
+          setProfile(null);
         }
-      } else {
-        setProfile(null);
+      } catch (error) {
+        console.error('Auth state change error:', error);
       }
     });
     return () => unsubscribe();
@@ -470,6 +484,16 @@ function AppContent() {
       });
     } catch (e) {
       console.error('Approve error:', e);
+    }
+  };
+
+  const updatePredictionName = async (id: string, newName: string) => {
+    try {
+      await updateDoc(doc(db, 'predictions', id), {
+        name: newName
+      });
+    } catch (e) {
+      console.error('Update name error:', e);
     }
   };
 
@@ -783,6 +807,24 @@ function AppContent() {
             >
               <h2 className="text-2xl font-bold mb-6 text-center text-white">2026 순위 예측하기</h2>
               
+              <div className="mb-8">
+                <p className="text-sm text-zinc-500 mb-4 text-center">카드를 드래그하여 순위를 조정하세요.</p>
+                <DndContext 
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext 
+                    items={predictRankings}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {predictRankings.map((id, index) => (
+                      <SortableItem key={id} id={id} team={getTeam(id)} index={index} />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+              </div>
+
               <div className="space-y-6 mb-8">
                 <div>
                   <label className="block text-sm font-bold text-zinc-400 mb-2">이름</label>
@@ -803,24 +845,6 @@ function AppContent() {
                     className="w-full p-3 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all h-24 resize-none placeholder:text-zinc-600"
                   />
                 </div>
-              </div>
-
-              <div className="mb-8">
-                <p className="text-sm text-zinc-500 mb-4 text-center">카드를 드래그하여 순위를 조정하세요.</p>
-                <DndContext 
-                  sensors={sensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={handleDragEnd}
-                >
-                  <SortableContext 
-                    items={predictRankings}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    {predictRankings.map((id, index) => (
-                      <SortableItem key={id} id={id} team={getTeam(id)} index={index} />
-                    ))}
-                  </SortableContext>
-                </DndContext>
               </div>
 
               <div className="flex gap-4">
@@ -960,7 +984,16 @@ function AppContent() {
                     <div key={pred.id} className="p-5 rounded-2xl bg-zinc-800 border border-zinc-700 shadow-lg">
                       <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
                         <div>
-                          <p className="text-lg font-black text-white mb-1">{pred.name}</p>
+                          <input 
+                            type="text"
+                            defaultValue={pred.name}
+                            onBlur={(e) => {
+                              if (e.target.value !== pred.name) {
+                                updatePredictionName(pred.id, e.target.value);
+                              }
+                            }}
+                            className="text-lg font-black text-white mb-1 bg-transparent border-b border-dashed border-zinc-600 focus:border-blue-500 outline-none w-full"
+                          />
                           <p className="text-sm text-zinc-400 italic">"{pred.message || '한마디 없음'}"</p>
                         </div>
                         <div className="flex gap-2 w-full sm:w-auto">
@@ -1049,7 +1082,21 @@ function AppContent() {
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-xl font-bold text-white truncate">{selectedPrediction.name}님의 예측</h3>
+                  {profile?.role === 'admin' ? (
+                    <input 
+                      type="text"
+                      defaultValue={selectedPrediction.name}
+                      onBlur={(e) => {
+                        if (e.target.value !== selectedPrediction.name) {
+                          updatePredictionName(selectedPrediction.id, e.target.value);
+                          setSelectedPrediction({ ...selectedPrediction, name: e.target.value });
+                        }
+                      }}
+                      className="text-xl font-bold text-white bg-transparent border-b border-dashed border-zinc-600 focus:border-blue-500 outline-none w-full mb-1"
+                    />
+                  ) : (
+                    <h3 className="text-xl font-bold text-white truncate">{selectedPrediction.name}님의 예측</h3>
+                  )}
                   <p className="text-sm text-zinc-500 italic break-words">"{getPredictionMessage(selectedPrediction)}"</p>
                 </div>
                 <button 
