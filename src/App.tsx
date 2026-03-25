@@ -30,7 +30,8 @@ import {
   Timestamp,
   getDoc,
   getDocs,
-  getDocFromServer
+  getDocFromServer,
+  increment
 } from 'firebase/firestore';
 import { 
   signInWithPopup, 
@@ -50,11 +51,12 @@ import {
   LogIn,
   ChevronUp,
   ChevronDown,
-  RefreshCw,
+  Home,
   AlertCircle,
   X,
   Quote,
-  Activity
+  Activity,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -78,6 +80,19 @@ const TEAMS = [
   { id: 'DOOSAN', name: '두산 베어스', short: '두산', color: '#131230' },
   { id: 'KIWOOM', name: '키움 히어로즈', short: '키움', color: '#820024' },
 ];
+
+const TEAM_SLOGANS: Record<string, string> = {
+  'LG': "잠실의 주인은 바뀌지 않는다, 2연패를 향한 '무적'의 시나리오",
+  'HANWHA': "보살들의 축제 시작! 이제는 '행복' 야구 말고 '우승' 야구 할 시간",
+  'SSG': "인천 상륙 작전은 현재진행형, 가을 DNA 깨우는 랜더스식 몰아치기",
+  'SAMSUNG': "왕조의 부활, 사자 군단의 포효가 대구 라팍을 뒤흔들 예감",
+  'NC': "창원 공룡들의 습격! 데이터도 예측 못 할 '집행검'급 파괴력",
+  'KT': "마법사의 시간은 멈추지 않는다, 가을 좀비들의 끈질긴 마법 쇼",
+  'LOTTE': "올해는 진짜 '기세'다! 사직구장 노래방 문 닫을 일 없는 시즌",
+  'KIA': "V13을 향한 호랑이의 발톱, 광주 챔필에 흩날릴 우승 꽃가루",
+  'DOOSAN': "미라클 두산의 귀환, 곰들의 뚝심으로 뒤집는 예측불허 상위권",
+  'KIWOOM': "고척 돔에 핀 영웅들의 투혼, 모두를 놀라게 할 '언더독'의 반란"
+};
 
 const DEFAULT_RANKING = [
   'LG', 'HANWHA', 'SSG', 'SAMSUNG', 'NC', 'KT', 'LOTTE', 'KIA', 'DOOSAN', 'KIWOOM'
@@ -153,7 +168,7 @@ const SortableItem = ({ id, team, index }: SortableItemProps) => {
         <span className="text-xl font-bold">{team?.name || 'Unknown'}</span>
       </div>
       <div className="opacity-50">
-        <RefreshCw size={20} />
+        <Activity size={20} />
       </div>
     </div>
   );
@@ -252,6 +267,7 @@ function AppContent() {
   // Admin State
   const [pendingPredictions, setPendingPredictions] = useState<Prediction[]>([]);
   const [adminRankingsText, setAdminRankingsText] = useState("");
+  const [visitorCount, setVisitorCount] = useState<number>(0);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -286,7 +302,7 @@ function AppContent() {
       setUser(u);
       if (u) {
         const userDoc = await getDoc(doc(db, 'users', u.uid));
-        const isAdminEmail = u.email === 'cerenis.injung@gmail.com';
+        const isAdminEmail = u.email?.toLowerCase() === 'cerenis.injung@gmail.com';
         
         if (userDoc.exists()) {
           const data = userDoc.data() as UserProfile;
@@ -312,6 +328,37 @@ function AppContent() {
       }
     });
     return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    // Increment and fetch visitor count
+    const incrementVisitors = async () => {
+      try {
+        const statsRef = doc(db, 'visitors', 'stats');
+        const statsDoc = await getDoc(statsRef);
+        if (!statsDoc.exists()) {
+          await setDoc(statsRef, { count: 1 });
+        } else {
+          await updateDoc(statsRef, { count: increment(1) });
+        }
+      } catch (e) {
+        console.error("Visitor count error:", e);
+      }
+    };
+
+    // Only increment once per session
+    const hasVisited = sessionStorage.getItem('hasVisited');
+    if (!hasVisited) {
+      incrementVisitors();
+      sessionStorage.setItem('hasVisited', 'true');
+    }
+
+    const unsub = onSnapshot(doc(db, 'visitors', 'stats'), (doc) => {
+      if (doc.exists()) {
+        setVisitorCount(doc.data().count);
+      }
+    });
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -366,7 +413,6 @@ function AppContent() {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Login failed:", error);
-      alert("로그인에 실패했습니다. 팝업 차단 여부를 확인하거나 다시 시도해주세요.");
     }
   };
 
@@ -406,14 +452,12 @@ function AppContent() {
         userId: user?.uid || null,
         createdAt: Timestamp.now()
       });
-      alert("예측이 제출되었습니다! 관리자의 승인을 기다려주세요.");
       setPredictName("");
       setPredictMessage("");
       setPredictRankings(DEFAULT_RANKING);
       setView('home');
     } catch (e) {
-      console.error(e);
-      alert("제출 중 오류가 발생했습니다.");
+      console.error('Submit error:', e);
     }
   };
 
@@ -423,19 +467,15 @@ function AppContent() {
         status: 'approved'
       });
     } catch (e) {
-      console.error(e);
-      alert("승인 처리 중 오류가 발생했습니다.");
+      console.error('Approve error:', e);
     }
   };
 
   const rejectPrediction = async (pred: Prediction) => {
-    if (confirm(`${pred.name}님의 예측을 반려하시겠습니까?`)) {
-      try {
-        await deleteDoc(doc(db, 'predictions', pred.id));
-      } catch (e) {
-        console.error(e);
-        alert("반려 처리 중 오류가 발생했습니다.");
-      }
+    try {
+      await deleteDoc(doc(db, 'predictions', pred.id));
+    } catch (e) {
+      console.error('Delete error:', e);
     }
   };
 
@@ -463,7 +503,7 @@ function AppContent() {
   const updateOfficialRankings = async () => {
     const parsed = parseAdminRankings(adminRankingsText);
     if (!parsed) {
-      alert("순위 데이터 형식이 올바르지 않습니다. 10개 구단이 모두 포함되어야 합니다.");
+      console.error("순위 데이터 형식이 올바르지 않습니다.");
       return;
     }
 
@@ -479,14 +519,40 @@ function AppContent() {
       const newScore = calculateScore(data.rankings, parsed);
       await updateDoc(doc(db, 'predictions', p.id), { score: newScore });
     }
-    alert("공식 순위가 업데이트되었습니다.");
     setAdminRankingsText("");
   };
 
   const getTeam = (id: string) => TEAMS.find(t => t.id === id);
 
+  const firstPlaceTeam = getTeam(currentRankings[0]);
+  const themeColor = firstPlaceTeam?.color || '#3b82f6';
+
+  const getPredictionMessage = (pred: Prediction, truncate = false) => {
+    const isAuto = !pred.message || pred.message.trim() === "";
+    const msg = isAuto ? (TEAM_SLOGANS[pred.rankings[0]] || "화이팅!") : pred.message;
+    
+    if (truncate) {
+      // Split by sentence or major phrase delimiters
+      const parts = msg.split(/[.!?]|,/).filter(p => p.trim().length > 0);
+      if (parts.length > 0) {
+        const firstPart = parts[0].trim();
+        // If it was a sentence ender, keep it. If it was a comma, just return the text.
+        const firstDelimiterMatch = msg.match(/[.!?]|,/);
+        const delimiter = firstDelimiterMatch ? firstDelimiterMatch[0] : '';
+        return firstPart + (['.', '!', '?'].includes(delimiter) ? delimiter : '');
+      }
+    }
+    return msg;
+  };
+
   return (
-    <div className="min-h-screen bg-black font-sans text-gray-100 pb-20">
+    <div 
+      className="min-h-screen font-sans text-gray-100 pb-20 transition-colors duration-1000"
+      style={{ 
+        backgroundColor: '#000',
+        backgroundImage: `radial-gradient(circle at 50% -20%, ${themeColor}15 0%, transparent 70%)`
+      }}
+    >
       {/* Header */}
       <header className="bg-zinc-900 border-b border-zinc-800 sticky top-0 z-50">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -543,36 +609,46 @@ function AppContent() {
 
       <main className="max-w-4xl mx-auto px-4 py-8">
         {/* Random Quote Section */}
-        <div className="mb-12 text-center flex flex-col items-center justify-center bg-zinc-900/50 py-8 px-6 rounded-3xl border border-zinc-800/50 relative overflow-hidden group">
-          <div className="absolute -top-4 -left-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <Trophy size={120} className="text-blue-500 rotate-12" />
-          </div>
-          <div className="absolute -bottom-4 -right-4 opacity-10 group-hover:opacity-20 transition-opacity">
-            <Trophy size={120} className="text-purple-500 -rotate-12" />
+        <div 
+          className="mb-12 text-center flex flex-col items-center justify-center bg-zinc-900/40 px-6 rounded-3xl border border-zinc-800/50 relative overflow-hidden group h-[220px] sm:h-[280px]"
+          style={{ 
+            boxShadow: `inset 0 0 60px ${themeColor}08`
+          }}
+        >
+          <div className="absolute -top-4 -left-4 opacity-5 group-hover:opacity-10 transition-opacity">
+            <Trophy size={160} style={{ color: themeColor }} className="rotate-12" />
           </div>
           
-          <div className="relative z-10">
-            <div className="flex justify-center mb-4 items-center gap-4">
-              <div className="w-12 h-1 bg-blue-500 rounded-full" />
-              <Quote size={24} className="text-zinc-600" />
-              <div className="w-12 h-1 bg-blue-500 rounded-full" />
+          <div className="relative z-10 w-full">
+            <div className="flex justify-center mb-6 items-center gap-4">
+              <div className="w-16 h-0.5 rounded-full opacity-30" style={{ backgroundColor: themeColor }} />
+              <Quote size={20} className="text-zinc-700" />
+              <div className="w-16 h-0.5 rounded-full opacity-30" style={{ backgroundColor: themeColor }} />
             </div>
             <AnimatePresence mode="wait">
               <motion.div
                 key={quote}
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 1.05, y: -10 }}
-                transition={{ type: "spring", stiffness: 100 }}
-                className="max-w-2xl mx-auto"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.4 }}
+                className="max-w-2xl mx-auto px-4"
               >
-                <p className="text-2xl sm:text-3xl font-black italic text-white tracking-tighter leading-tight drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">
+                <p 
+                  className={cn(
+                    "font-black italic text-white tracking-tighter leading-tight transition-all duration-500",
+                    quote.length > 40 ? "text-xl sm:text-2xl" : "text-2xl sm:text-4xl"
+                  )}
+                  style={{ 
+                    textShadow: `0 0 20px ${themeColor}44`
+                  }}
+                >
                   "{quote}"
                 </p>
               </motion.div>
             </AnimatePresence>
-            <div className="flex justify-center mt-4">
-              <div className="w-12 h-1 bg-purple-500 rounded-full" />
+            <div className="flex justify-center mt-8">
+              <div className="w-1 h-1 rounded-full opacity-50" style={{ backgroundColor: themeColor }} />
             </div>
           </div>
         </div>
@@ -583,8 +659,9 @@ function AppContent() {
             onClick={() => setView('home')}
             className={cn(
               "flex-1 py-3 rounded-xl font-black transition-all text-sm uppercase tracking-widest",
-              view === 'home' ? "bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]" : "text-zinc-500 hover:text-zinc-300"
+              view === 'home' ? "text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
             )}
+            style={view === 'home' ? { backgroundColor: themeColor, boxShadow: `0 0 20px ${themeColor}4D` } : {}}
           >
             홈
           </button>
@@ -592,8 +669,9 @@ function AppContent() {
             onClick={() => setView('leaderboard')}
             className={cn(
               "flex-1 py-3 rounded-xl font-black transition-all text-sm uppercase tracking-widest",
-              view === 'leaderboard' ? "bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]" : "text-zinc-500 hover:text-zinc-300"
+              view === 'leaderboard' ? "text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
             )}
+            style={view === 'leaderboard' ? { backgroundColor: themeColor, boxShadow: `0 0 20px ${themeColor}4D` } : {}}
           >
             리더보드
           </button>
@@ -621,13 +699,25 @@ function AppContent() {
               className="space-y-8"
             >
               {/* Current Status Card */}
-              <div className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
-                <div className="flex flex-col items-center justify-center mb-6 text-center">
-                  <h2 className="text-xl font-bold flex items-center gap-2 mb-1 text-white">
-                    <CheckCircle className="text-green-500" />
+              <div 
+                className="rounded-3xl p-8 shadow-2xl border border-zinc-800/50 relative overflow-hidden"
+                style={{ 
+                  background: `linear-gradient(145deg, ${themeColor}25 0%, #111113 35%, #000000 100%)`,
+                  boxShadow: `0 25px 50px -12px ${themeColor}15`
+                }}
+              >
+                <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-white/[0.03] to-transparent rounded-full -mr-32 -mt-32 blur-3xl pointer-events-none" />
+                
+                <div className="flex flex-col items-center justify-center mb-8 text-center relative z-10">
+                  <h2 className="text-2xl font-black flex items-center gap-3 mb-1 text-white tracking-tight">
+                    <CheckCircle className="text-green-500" size={24} />
                     현재 KBO 순위
                   </h2>
-                  <span className="text-xs text-zinc-500">관리자 업데이트 기준</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1 h-1 rounded-full" style={{ backgroundColor: themeColor }} />
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.2em]">Official Rankings</span>
+                    <div className="w-1 h-1 rounded-full" style={{ backgroundColor: themeColor }} />
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {currentRankings.map((id, idx) => {
@@ -639,9 +729,11 @@ function AppContent() {
                       >
                         {/* Team Color Accent */}
                         <div 
-                          className="absolute left-0 top-0 bottom-0 w-1.5 opacity-80 group-hover:w-2 transition-all" 
+                          className="absolute left-0 top-0 bottom-0 w-1 opacity-40 group-hover:w-1.5 transition-all" 
                           style={{ backgroundColor: team?.color }} 
                         />
+                        
+                        <div className="absolute inset-0 bg-gradient-to-r from-white/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                         
                         <span className="text-2xl font-black text-zinc-600 w-8 text-center italic">
                           {idx + 1}
@@ -755,10 +847,12 @@ function AppContent() {
               className="space-y-4"
             >
               <div className="bg-zinc-900 rounded-2xl shadow-xl overflow-hidden border border-zinc-800">
-                <div className="bg-blue-900 p-6 text-white text-center border-b border-blue-800">
-                  <Trophy size={48} className="mx-auto mb-2 text-yellow-400" />
-                  <h2 className="text-2xl font-black">예측 리더보드</h2>
-                  <p className="text-blue-200 text-sm">정확한 순위 예측으로 점수를 획득하세요!</p>
+                <div className="bg-blue-900 px-6 py-4 text-white text-center border-b border-blue-800">
+                  <div className="flex items-center justify-center gap-3">
+                    <Trophy size={24} className="text-yellow-400" />
+                    <h2 className="text-xl font-black">예측 리더보드</h2>
+                  </div>
+                  <p className="text-blue-200 text-xs mt-1">정확한 순위 예측으로 점수를 획득하세요!</p>
                 </div>
                 
                 <div className="divide-y divide-zinc-800">
@@ -778,18 +872,32 @@ function AppContent() {
                           )}>
                             {idx + 1}
                           </span>
-                          <div>
-                            <p className="font-bold text-white group-hover:text-blue-400 transition-colors">{pred.name}</p>
-                            <p className="text-xs text-zinc-500 truncate max-w-[150px] sm:max-w-xs italic">"{pred.message || '화이팅!'}"</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-white group-hover:text-blue-400 transition-colors truncate">{pred.name}</p>
+                            <p className="text-[10px] text-zinc-500 truncate max-w-[180px] sm:max-w-xs italic">"{getPredictionMessage(pred, true)}"</p>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xl font-black text-blue-400">{pred.score}점</p>
-                          <div className="flex gap-0.5 mt-1">
-                            {pred.rankings.slice(0, 5).map((id) => (
-                              <div key={id} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getTeam(id)?.color }} />
-                            ))}
+                        <div className="text-right flex-shrink-0 flex items-center gap-3">
+                          <div>
+                            <p className="text-xl font-black text-blue-400">{pred.score}점</p>
+                            <div className="flex gap-0.5 mt-1 justify-end">
+                              {pred.rankings.slice(0, 5).map((id) => (
+                                <div key={id} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getTeam(id)?.color }} />
+                              ))}
+                            </div>
                           </div>
+                          {profile?.role === 'admin' && (
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                rejectPrediction(pred);
+                              }}
+                              className="p-2 hover:bg-red-600/20 text-red-500 rounded-lg transition-colors"
+                              title="삭제"
+                            >
+                              <X size={16} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))
@@ -864,7 +972,7 @@ function AppContent() {
                             onClick={() => rejectPrediction(pred)}
                             className="flex-1 sm:flex-none px-6 py-2.5 bg-red-600/20 text-red-400 border border-red-900/50 rounded-xl text-sm font-black hover:bg-red-600 hover:text-white transition-all"
                           >
-                            반려하기
+                            삭제하기
                           </button>
                         </div>
                       </div>
@@ -895,14 +1003,14 @@ function AppContent() {
       </main>
 
       {/* Footer Navigation (Mobile Style) */}
-      <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 p-2 flex justify-around sm:hidden">
+      <div className="fixed bottom-0 left-0 right-0 bg-zinc-900 border-t border-zinc-800 p-2 flex justify-around sm:hidden z-50">
         <button onClick={() => setView('home')} className={cn("p-2 flex flex-col items-center", view === 'home' ? "text-blue-400" : "text-zinc-600")}>
-          <RefreshCw size={20} />
-          <span className="text-[10px] font-bold">홈</span>
+          <Home size={20} style={view === 'home' ? { color: themeColor } : {}} />
+          <span className="text-[10px] font-bold" style={view === 'home' ? { color: themeColor } : {}}>홈</span>
         </button>
         <button onClick={() => setView('leaderboard')} className={cn("p-2 flex flex-col items-center", view === 'leaderboard' ? "text-blue-400" : "text-zinc-600")}>
-          <Trophy size={20} />
-          <span className="text-[10px] font-bold">리더보드</span>
+          <Trophy size={20} style={view === 'leaderboard' ? { color: themeColor } : {}} />
+          <span className="text-[10px] font-bold" style={view === 'leaderboard' ? { color: themeColor } : {}}>리더보드</span>
         </button>
         {profile?.role === 'admin' && (
           <button onClick={() => setView('admin')} className={cn("p-2 flex flex-col items-center", view === 'admin' ? "text-purple-400" : "text-zinc-600")}>
@@ -910,6 +1018,22 @@ function AppContent() {
             <span className="text-[10px] font-bold">관리</span>
           </button>
         )}
+      </div>
+
+      {/* Visitor Counter (Desktop/Tablet) */}
+      <div className="fixed bottom-4 right-4 hidden sm:flex items-center gap-2 bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 px-3 py-1.5 rounded-full shadow-lg z-40">
+        <Users size={14} className="text-zinc-500" />
+        <span className="text-xs font-bold text-zinc-400">
+          누적 방문 <span className="text-blue-400">{visitorCount.toLocaleString()}</span>
+        </span>
+      </div>
+
+      {/* Visitor Counter (Mobile) */}
+      <div className="fixed bottom-16 right-4 sm:hidden flex items-center gap-2 bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 px-3 py-1.5 rounded-full shadow-lg z-40">
+        <Users size={12} className="text-zinc-500" />
+        <span className="text-[10px] font-bold text-zinc-400">
+          방문 <span className="text-blue-400">{visitorCount.toLocaleString()}</span>
+        </span>
       </div>
       {/* Prediction Detail Modal */}
       <AnimatePresence>
@@ -922,13 +1046,13 @@ function AppContent() {
               className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
             >
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-bold text-white">{selectedPrediction.name}님의 예측</h3>
-                  <p className="text-sm text-zinc-500 italic">"{selectedPrediction.message || '화이팅!'}"</p>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-xl font-bold text-white truncate">{selectedPrediction.name}님의 예측</h3>
+                  <p className="text-sm text-zinc-500 italic break-words">"{getPredictionMessage(selectedPrediction)}"</p>
                 </div>
                 <button 
                   onClick={() => setSelectedPrediction(null)}
-                  className="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 transition-colors"
+                  className="p-2 hover:bg-zinc-800 rounded-full text-zinc-400 transition-colors flex-shrink-0 ml-2"
                 >
                   <X size={24} />
                 </button>

@@ -29,6 +29,11 @@ service cloud.firestore {
     //   - rankings: list of strings
     //   - updatedAt: timestamp
     //
+    // Collection: visitors
+    // Document ID: stats
+    // Fields:
+    //   - count: number
+    //
     // ===============================================================
 
     // ===============================================================
@@ -93,6 +98,12 @@ service cloud.firestore {
     match /settings/currentRanking {
       allow read: if true;
       allow write: if isAdmin() && isValidCurrentRanking(request.resource.data);
+    }
+
+    match /visitors/stats {
+      allow read: if true;
+      allow update: if true; // Simple increment for visitor counter
+      allow create: if isAdmin();
     }
   }
 }
