@@ -102,8 +102,11 @@ service cloud.firestore {
 
     match /visitors/stats {
       allow read: if true;
-      allow update: if true; // Simple increment for visitor counter
-      allow create: if isAdmin();
+      allow create: if request.resource.data.keys().hasOnly(['count']) &&
+                     request.resource.data.count == 1;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']) &&
+                     request.resource.data.count is number &&
+                     request.resource.data.count == resource.data.count + 1;
     }
   }
 }
