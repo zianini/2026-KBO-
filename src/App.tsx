@@ -438,7 +438,7 @@ function AppContent() {
       } else if (error.code === 'auth/cancelled-popup-request') {
         // User closed the popup, ignore
       } else {
-        alert("로그인 중 오류가 발생했습니다: " + error.message);
+        alert(`로그인 중 오류가 발생했습니다: ${error.message}\n현재 접속 도메인: ${window.location.hostname}\n\n팁: Google Cloud 콘솔에서 API 키의 '웹사이트 제한' 설정을 확인해 보세요.`);
       }
     }
   };
