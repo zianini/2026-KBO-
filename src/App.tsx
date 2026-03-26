@@ -582,6 +582,16 @@ function AppContent() {
     return msg;
   };
 
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return "";
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  };
+
   return (
     <div 
       className="min-h-screen font-sans text-gray-100 pb-20 transition-colors duration-1000"
@@ -911,7 +921,12 @@ function AppContent() {
                             {idx + 1}
                           </span>
                           <div className="min-w-0 flex-1">
-                            <p className="font-bold text-white group-hover:text-blue-400 transition-colors truncate">{pred.name}</p>
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <p className="font-bold text-white group-hover:text-blue-400 transition-colors truncate">{pred.name}</p>
+                              <span className="text-[9px] text-zinc-600 font-medium bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-800">
+                                {formatDate(pred.createdAt)}
+                              </span>
+                            </div>
                             <p className="text-[10px] text-zinc-500 truncate max-w-[180px] sm:max-w-xs italic">"{getPredictionMessage(pred, true)}"</p>
                           </div>
                         </div>
@@ -1095,19 +1110,25 @@ function AppContent() {
               <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
                 <div className="min-w-0 flex-1">
                   {profile?.role === 'admin' ? (
-                    <input 
-                      type="text"
-                      defaultValue={selectedPrediction.name}
-                      onBlur={(e) => {
-                        if (e.target.value !== selectedPrediction.name) {
-                          updatePredictionName(selectedPrediction.id, e.target.value);
-                          setSelectedPrediction({ ...selectedPrediction, name: e.target.value });
-                        }
-                      }}
-                      className="text-xl font-bold text-white bg-transparent border-b border-dashed border-zinc-600 focus:border-blue-500 outline-none w-full mb-1"
-                    />
+                    <div className="space-y-1">
+                      <input 
+                        type="text"
+                        defaultValue={selectedPrediction.name}
+                        onBlur={(e) => {
+                          if (e.target.value !== selectedPrediction.name) {
+                            updatePredictionName(selectedPrediction.id, e.target.value);
+                            setSelectedPrediction({ ...selectedPrediction, name: e.target.value });
+                          }
+                        }}
+                        className="text-xl font-bold text-white bg-transparent border-b border-dashed border-zinc-600 focus:border-blue-500 outline-none w-full mb-1"
+                      />
+                      <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest">{formatDate(selectedPrediction.createdAt)} 예측됨</p>
+                    </div>
                   ) : (
-                    <h3 className="text-xl font-bold text-white truncate">{selectedPrediction.name}님의 예측</h3>
+                    <div>
+                      <h3 className="text-xl font-bold text-white truncate">{selectedPrediction.name}님의 예측</h3>
+                      <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-widest">{formatDate(selectedPrediction.createdAt)} 예측됨</p>
+                    </div>
                   )}
                   <p className="text-sm text-zinc-500 italic break-words">"{getPredictionMessage(selectedPrediction)}"</p>
                 </div>
