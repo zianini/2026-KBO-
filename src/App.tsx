@@ -40,6 +40,16 @@ import {
   signOut,
   User as FirebaseUser
 } from 'firebase/auth';
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer 
+} from 'recharts';
 import { db, auth } from './firebase';
 import { 
   Trophy, 
@@ -265,6 +275,8 @@ function AppContent() {
 
   // Admin State
   const [pendingPredictions, setPendingPredictions] = useState<Prediction[]>([]);
+  const [historicalRankings, setHistoricalRankings] = useState<any[]>([]);
+  const [extractedRankings, setExtractedRankings] = useState<string[] | null>(null);
   const [adminRankingsText, setAdminRankingsText] = useState("");
   const [visitorCount, setVisitorCount] = useState<number>(0);
 
@@ -426,6 +438,34 @@ function AppContent() {
     }
   }, [profile]);
 
+  useEffect(() => {
+    // Fetch Historical Rankings from March 28th onwards
+    const startDate = new Date('2026-03-28T00:00:00Z');
+    const q = query(
+      collection(db, 'historicalRankings'), 
+      where('date', '>=', Timestamp.fromDate(startDate)),
+      orderBy('date', 'asc')
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      setHistoricalRankings(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, []);
+
+  const chartData = useMemo(() => {
+    // Group by date to avoid multiple points on the same day if needed, 
+    // but for now let's just show all points in order.
+    return historicalRankings.map(h => {
+      const date = h.date?.toDate ? h.date.toDate() : new Date(h.date);
+      const formattedDate = `${date.getMonth() + 1}.${date.getDate()}`;
+      const entry: any = { date: formattedDate, fullDate: date.toLocaleString() };
+      h.rankings.forEach((teamId: string, idx: number) => {
+        entry[teamId] = idx + 1;
+      });
+      return entry;
+    });
+  }, [historicalRankings]);
+
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
@@ -537,16 +577,31 @@ function AppContent() {
     return null;
   };
 
-  const updateOfficialRankings = async () => {
+  const handleExtractRankings = () => {
     const parsed = parseAdminRankings(adminRankingsText);
     if (!parsed) {
-      console.error("순위 데이터 형식이 올바르지 않습니다.");
+      alert("순위 데이터 형식이 올바르지 않거나 10개 팀을 모두 찾을 수 없습니다.");
+      setExtractedRankings(null);
       return;
     }
+    setExtractedRankings(parsed);
+  };
 
+  const updateOfficialRankings = async () => {
+    if (!extractedRankings) return;
+    const parsed = extractedRankings;
+
+    // Update current ranking
     await setDoc(doc(db, 'settings', 'currentRanking'), {
       rankings: parsed,
       updatedAt: Timestamp.now()
+    });
+
+    // Save to history
+    await addDoc(collection(db, 'historicalRankings'), {
+      rankings: parsed,
+      date: Timestamp.now(),
+      createdAt: Timestamp.now()
     });
     
     // Recalculate all scores
@@ -557,6 +612,8 @@ function AppContent() {
       await updateDoc(doc(db, 'predictions', p.id), { score: newScore });
     }
     setAdminRankingsText("");
+    setExtractedRankings(null);
+    alert("공식 순위가 성공적으로 업데이트되었습니다.");
   };
 
   const getTeam = (id: string) => TEAMS.find(t => t.id === id);
@@ -816,6 +873,64 @@ function AppContent() {
                   순위 예측하기
                 </button>
               </div>
+
+              {/* Ranking Trends Graph */}
+              {historicalRankings.length > 1 && (
+                <div className="mt-12 bg-zinc-900 rounded-2xl p-6 border border-zinc-800 shadow-xl">
+                  <div className="flex items-center gap-2 mb-6">
+                    <Activity className="text-blue-400" />
+                    <h2 className="text-xl font-bold text-white">순위 변동 추이 (3/28 이후)</h2>
+                  </div>
+                  <div className="h-[400px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                        <XAxis 
+                          dataKey="date" 
+                          stroke="#666" 
+                          fontSize={12} 
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <YAxis 
+                          reversed 
+                          domain={[1, 10]} 
+                          ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} 
+                          stroke="#666" 
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' }}
+                          itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
+                          labelStyle={{ color: '#999', marginBottom: '4px', fontSize: '10px' }}
+                        />
+                        <Legend 
+                          iconType="circle" 
+                          wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }}
+                        />
+                        {TEAMS.map(team => (
+                          <Line 
+                            key={team.id}
+                            type="monotone" 
+                            dataKey={team.id} 
+                            name={team.short}
+                            stroke={team.color} 
+                            strokeWidth={3}
+                            dot={{ r: 4, fill: team.color, strokeWidth: 0 }}
+                            activeDot={{ r: 6, strokeWidth: 0 }}
+                            connectNulls
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-[10px] text-zinc-600 mt-4 text-center font-bold uppercase tracking-widest">
+                    * Y축이 위로 갈수록 높은 순위(1위)입니다.
+                  </p>
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -991,12 +1106,60 @@ function AppContent() {
                   className="w-full p-4 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all h-48 font-mono text-sm mb-4 placeholder:text-zinc-600"
                 />
 
-                <button 
-                  onClick={updateOfficialRankings}
-                  className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition-all shadow-lg"
-                >
-                  텍스트에서 순위 추출 및 업데이트
-                </button>
+                <div className="flex gap-4 mb-6">
+                  <button 
+                    onClick={handleExtractRankings}
+                    className="flex-1 py-4 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                  >
+                    순위 추출하기
+                  </button>
+                  <button 
+                    onClick={updateOfficialRankings}
+                    disabled={!extractedRankings}
+                    className={cn(
+                      "flex-1 py-4 rounded-xl font-bold transition-all shadow-lg",
+                      extractedRankings 
+                        ? "bg-purple-600 text-white hover:bg-purple-700" 
+                        : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
+                    )}
+                  >
+                    공식 순위 업데이트
+                  </button>
+                </div>
+
+                {/* Extraction Preview */}
+                <AnimatePresence>
+                  {extractedRankings && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="p-5 bg-zinc-800/50 rounded-2xl border border-purple-900/30 mb-4">
+                        <h3 className="text-sm font-black text-purple-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                          <CheckCircle size={14} />
+                          추출된 순위 미리보기
+                        </h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                          {extractedRankings.map((teamId, idx) => {
+                            const team = getTeam(teamId);
+                            return (
+                              <div key={teamId} className="flex items-center gap-2 p-2 bg-zinc-900 rounded-lg border border-zinc-800">
+                                <span className="text-xs font-black text-zinc-600 w-4">{idx + 1}</span>
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: team?.color }} />
+                                <span className="text-xs font-bold text-zinc-300 truncate">{team?.short}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-zinc-500 mt-4 italic text-center">
+                          위 순위가 맞다면 '공식 순위 업데이트' 버튼을 눌러주세요.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Pending Approvals */}

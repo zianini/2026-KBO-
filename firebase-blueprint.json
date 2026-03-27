@@ -41,6 +41,20 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["rankings", "updatedAt"]
+    },
+    "HistoricalRanking": {
+      "title": "HistoricalRanking",
+      "description": "Historical KBO rankings for trend analysis",
+      "type": "object",
+      "properties": {
+        "rankings": { 
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "date": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["rankings", "date", "createdAt"]
     }
   },
   "firestore": {
@@ -55,6 +69,10 @@
     "/settings/currentRanking": {
       "schema": "CurrentRanking",
       "description": "Current official rankings"
+    },
+    "/historicalRankings/{rankingId}": {
+      "schema": "HistoricalRanking",
+      "description": "Historical rankings records"
     }
   }
 }

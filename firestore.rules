@@ -34,6 +34,13 @@ service cloud.firestore {
     // Fields:
     //   - count: number
     //
+    // Collection: historicalRankings
+    // Document ID: rankingId
+    // Fields:
+    //   - rankings: list of strings
+    //   - date: timestamp
+    //   - createdAt: timestamp
+    //
     // ===============================================================
 
     // ===============================================================
@@ -78,6 +85,13 @@ service cloud.firestore {
              data.updatedAt is timestamp;
     }
 
+    function isValidHistoricalRanking(data) {
+      return data.keys().hasOnly(['rankings', 'date', 'createdAt']) &&
+             data.rankings is list && data.rankings.size() == 10 &&
+             data.date is timestamp &&
+             data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -107,6 +121,12 @@ service cloud.firestore {
       allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count']) &&
                      request.resource.data.count is number &&
                      request.resource.data.count == resource.data.count + 1;
+    }
+
+    match /historicalRankings/{rankingId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidHistoricalRanking(request.resource.data);
+      allow update, delete: if isAdmin();
     }
   }
 }
