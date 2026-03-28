@@ -1044,55 +1044,61 @@ function AppContent() {
                 
                 <div className="divide-y divide-zinc-800">
                   {predictions.length > 0 ? (
-                    predictions.map((pred, idx) => (
-                      <div 
-                        key={pred.id} 
-                        onClick={() => setSelectedPrediction(pred)}
-                        className="p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors cursor-pointer group"
-                      >
-                        <div className="flex items-center gap-4">
-                          <span className={cn(
-                            "w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm",
-                            idx === 0 ? "bg-yellow-500 text-black" : 
-                            idx === 1 ? "bg-zinc-300 text-black" :
-                            idx === 2 ? "bg-amber-600 text-white" : "bg-zinc-800 text-zinc-500"
-                          )}>
-                            {idx + 1}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <p className="font-bold text-white group-hover:text-blue-400 transition-colors truncate">{pred.name}</p>
-                              <span className="text-[9px] text-zinc-600 font-medium bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-800">
-                                {formatDate(pred.createdAt)}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-zinc-500 truncate max-w-[180px] sm:max-w-xs italic">"{getPredictionMessage(pred, true)}"</p>
-                          </div>
-                        </div>
-                        <div className="text-right flex-shrink-0 flex items-center gap-3">
-                          <div>
-                            <p className="text-xl font-black text-blue-400">{pred.score}점</p>
-                            <div className="flex gap-0.5 mt-1 justify-end">
-                              {pred.rankings.slice(0, 5).map((id) => (
-                                <div key={id} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getTeam(id)?.color }} />
-                              ))}
-                            </div>
-                          </div>
-                          {profile?.role === 'admin' && (
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                rejectPrediction(pred);
-                              }}
-                              className="p-2 hover:bg-red-600/20 text-red-500 rounded-lg transition-colors"
-                              title="삭제"
-                            >
-                              <X size={16} />
-                            </button>
+                    predictions.map((pred, idx) => {
+                      const displayRank = predictions.findIndex(p => p.score === pred.score) + 1;
+                      return (
+                        <div 
+                          key={pred.id} 
+                          onClick={() => setSelectedPrediction(pred)}
+                          className={cn(
+                            "p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors cursor-pointer group",
+                            user?.uid === pred.userId && "bg-blue-600/10 border-l-4 border-blue-500"
                           )}
+                        >
+                          <div className="flex items-center gap-4">
+                            <span className={cn(
+                              "w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm",
+                              displayRank === 1 ? "bg-yellow-500 text-black" : 
+                              displayRank === 2 ? "bg-zinc-300 text-black" :
+                              displayRank === 3 ? "bg-amber-600 text-white" : "bg-zinc-800 text-zinc-500"
+                            )}>
+                              {displayRank}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <p className="font-bold text-white group-hover:text-blue-400 transition-colors truncate">{pred.name}</p>
+                                <span className="text-[9px] text-zinc-600 font-medium bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-800">
+                                  {formatDate(pred.createdAt)}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-zinc-500 truncate max-w-[180px] sm:max-w-xs italic">"{getPredictionMessage(pred, true)}"</p>
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0 flex items-center gap-3">
+                            <div>
+                              <p className="text-xl font-black text-blue-400">{pred.score}점</p>
+                              <div className="flex gap-0.5 mt-1 justify-end">
+                                {pred.rankings.slice(0, 5).map((id) => (
+                                  <div key={id} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getTeam(id)?.color }} />
+                                ))}
+                              </div>
+                            </div>
+                            {profile?.role === 'admin' && (
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  rejectPrediction(pred);
+                                }}
+                                className="p-2 hover:bg-red-600/20 text-red-500 rounded-lg transition-colors"
+                                title="삭제"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="p-12 text-center text-zinc-600">
                       <Clock size={48} className="mx-auto mb-4 opacity-20" />
