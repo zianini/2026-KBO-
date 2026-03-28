@@ -36,7 +36,14 @@
       "properties": {
         "rankings": { 
           "type": "array",
-          "items": { "type": "string" }
+          "items": { 
+            "type": "object",
+            "properties": {
+              "teamId": { "type": "string" },
+              "rank": { "type": "integer" }
+            },
+            "required": ["teamId", "rank"]
+          }
         },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -49,7 +56,14 @@
       "properties": {
         "rankings": { 
           "type": "array",
-          "items": { "type": "string" }
+          "items": { 
+            "type": "object",
+            "properties": {
+              "teamId": { "type": "string" },
+              "rank": { "type": "integer" }
+            },
+            "required": ["teamId", "rank"]
+          }
         },
         "date": { "type": "string", "format": "date-time" },
         "createdAt": { "type": "string", "format": "date-time" }

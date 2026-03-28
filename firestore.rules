@@ -26,7 +26,7 @@ service cloud.firestore {
     // Collection: settings
     // Document ID: currentRanking
     // Fields:
-    //   - rankings: list of strings
+    //   - rankings: list of objects { teamId: string, rank: number }
     //   - updatedAt: timestamp
     //
     // Collection: visitors
@@ -37,7 +37,7 @@ service cloud.firestore {
     // Collection: historicalRankings
     // Document ID: rankingId
     // Fields:
-    //   - rankings: list of strings
+    //   - rankings: list of objects { teamId: string, rank: number }
     //   - date: timestamp
     //   - createdAt: timestamp
     //

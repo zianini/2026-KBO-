@@ -124,6 +124,11 @@ const QUOTES = [
 ];
 
 // --- Types ---
+interface RankingEntry {
+  teamId: string;
+  rank: number;
+}
+
 interface Prediction {
   id: string;
   name: string;
@@ -262,7 +267,9 @@ function AppContent() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [quote, setQuote] = useState("");
-  const [currentRankings, setCurrentRankings] = useState<string[]>(DEFAULT_RANKING);
+  const [currentRankings, setCurrentRankings] = useState<RankingEntry[]>(
+    DEFAULT_RANKING.map((id, idx) => ({ teamId: id, rank: idx + 1 }))
+  );
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [myPrediction, setMyPrediction] = useState<Prediction | null>(null);
   const [view, setView] = useState<'home' | 'predict' | 'leaderboard' | 'admin'>('home');
@@ -276,7 +283,7 @@ function AppContent() {
   // Admin State
   const [pendingPredictions, setPendingPredictions] = useState<Prediction[]>([]);
   const [historicalRankings, setHistoricalRankings] = useState<any[]>([]);
-  const [extractedRankings, setExtractedRankings] = useState<string[] | null>(null);
+  const [extractedRankings, setExtractedRankings] = useState<RankingEntry[] | null>(null);
   const [adminRankingsText, setAdminRankingsText] = useState("");
   const [visitorCount, setVisitorCount] = useState<number>(0);
 
@@ -396,7 +403,15 @@ function AppContent() {
     // Fetch Current Official Rankings
     const unsub = onSnapshot(doc(db, 'settings', 'currentRanking'), (doc) => {
       if (doc.exists()) {
-        setCurrentRankings(doc.data().rankings);
+        const data = doc.data();
+        // Handle legacy string[] format if needed, but we'll assume new format
+        const rawRankings = data.rankings || [];
+        if (rawRankings.length > 0 && typeof rawRankings[0] === 'string') {
+          // Legacy format: convert to RankingEntry[]
+          setCurrentRankings(rawRankings.map((id: string, idx: number) => ({ teamId: id, rank: idx + 1 })));
+        } else {
+          setCurrentRankings(rawRankings);
+        }
       }
     });
     return () => unsub();
@@ -459,8 +474,10 @@ function AppContent() {
       const date = h.date?.toDate ? h.date.toDate() : new Date(h.date);
       const formattedDate = `${date.getMonth() + 1}.${date.getDate()}`;
       const entry: any = { date: formattedDate, fullDate: date.toLocaleString() };
-      h.rankings.forEach((teamId: string, idx: number) => {
-        entry[teamId] = idx + 1;
+      h.rankings.forEach((r: any) => {
+        const teamId = typeof r === 'string' ? r : r.teamId;
+        const rank = typeof r === 'string' ? (h.rankings.indexOf(r) + 1) : r.rank;
+        entry[teamId] = rank;
       });
       return entry;
     });
@@ -496,13 +513,14 @@ function AppContent() {
     }
   };
 
-  const calculateScore = (predicted: string[], actual: string[]) => {
+  const calculateScore = (predicted: string[], actual: RankingEntry[]) => {
     let score = 0;
     predicted.forEach((teamId, index) => {
-      const actualIndex = actual.indexOf(teamId);
-      if (index === actualIndex) {
+      const predictedRank = index + 1;
+      const actualEntry = actual.find(a => a.teamId === teamId);
+      if (actualEntry && predictedRank === actualEntry.rank) {
         // Exact match: points based on rank (1st = 10, 10th = 1)
-        score += (10 - index);
+        score += (11 - predictedRank);
       }
     });
     return score;
@@ -556,17 +574,19 @@ function AppContent() {
     }
   };
 
-  const parseAdminRankings = (text: string) => {
+  const parseAdminRankings = (text: string): RankingEntry[] | null => {
     const lines = text.trim().split('\n');
-    const newRankings: string[] = [];
+    const newRankings: RankingEntry[] = [];
     
     lines.forEach(line => {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 2) {
+        const rankStr = parts[0].replace(/[^0-9]/g, '');
         const teamName = parts[1];
+        const rank = parseInt(rankStr, 10);
         const team = TEAMS.find(t => t.short === teamName || t.name.includes(teamName));
-        if (team && !newRankings.includes(team.id)) {
-          newRankings.push(team.id);
+        if (team && !isNaN(rank)) {
+          newRankings.push({ teamId: team.id, rank });
         }
       }
     });
@@ -618,7 +638,11 @@ function AppContent() {
 
   const getTeam = (id: string) => TEAMS.find(t => t.id === id);
 
-  const firstPlaceTeam = getTeam(currentRankings[0]);
+  const sortedCurrentRankings = useMemo(() => {
+    return [...currentRankings].sort((a, b) => a.rank - b.rank);
+  }, [currentRankings]);
+
+  const firstPlaceTeam = getTeam(sortedCurrentRankings[0]?.teamId);
   const themeColor = firstPlaceTeam?.color || '#3b82f6';
 
   const getPredictionMessage = (pred: Prediction, truncate = false) => {
@@ -825,11 +849,11 @@ function AppContent() {
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {currentRankings.map((id, idx) => {
-                    const team = getTeam(id);
+                  {sortedCurrentRankings.map((entry) => {
+                    const team = getTeam(entry.teamId);
                     return (
                       <div 
-                        key={id} 
+                        key={entry.teamId} 
                         className="relative overflow-hidden flex items-center gap-4 p-4 rounded-2xl bg-zinc-800/50 border border-zinc-700/50 group hover:border-zinc-500 transition-all"
                       >
                         {/* Team Color Accent */}
@@ -841,7 +865,7 @@ function AppContent() {
                         <div className="absolute inset-0 bg-gradient-to-r from-white/[0.02] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                         
                         <span className="text-2xl font-black text-zinc-600 w-8 text-center italic">
-                          {idx + 1}
+                          {entry.rank}
                         </span>
                         
                         <div className="flex flex-col">
@@ -1142,11 +1166,11 @@ function AppContent() {
                           추출된 순위 미리보기
                         </h3>
                         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                          {extractedRankings.map((teamId, idx) => {
-                            const team = getTeam(teamId);
+                          {extractedRankings.sort((a, b) => a.rank - b.rank).map((entry) => {
+                            const team = getTeam(entry.teamId);
                             return (
-                              <div key={teamId} className="flex items-center gap-2 p-2 bg-zinc-900 rounded-lg border border-zinc-800">
-                                <span className="text-xs font-black text-zinc-600 w-4">{idx + 1}</span>
+                              <div key={entry.teamId} className="flex items-center gap-2 p-2 bg-zinc-900 rounded-lg border border-zinc-800">
+                                <span className="text-xs font-black text-zinc-600 w-4">{entry.rank}</span>
                                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: team?.color }} />
                                 <span className="text-xs font-bold text-zinc-300 truncate">{team?.short}</span>
                               </div>
@@ -1305,7 +1329,8 @@ function AppContent() {
               <div className="p-6 space-y-2 max-h-[60vh] overflow-y-auto">
                 {selectedPrediction.rankings.map((teamId, idx) => {
                   const team = getTeam(teamId);
-                  const isCorrect = currentRankings[idx] === teamId;
+                  const actualEntry = currentRankings.find(a => a.teamId === teamId);
+                  const isCorrect = actualEntry && actualEntry.rank === idx + 1;
                   return (
                     <div 
                       key={teamId} 
