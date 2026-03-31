@@ -66,7 +66,9 @@ import {
   X,
   Quote,
   Activity,
-  Users
+  Users,
+  RefreshCw,
+  Calculator
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -583,12 +585,29 @@ function AppContent() {
   };
 
   const calculateScore = (predicted: string[], actual: RankingEntry[]) => {
+    if (!predicted || !actual || actual.length === 0) {
+      return { score: 0, correctCount: 0, weightedPoints: 0 };
+    }
+
     let weightedPoints = 0;
     let correctCount = 0;
+    
+    // Create a map for faster lookup with normalized keys
+    const actualMap = new Map<string, number>();
+    actual.forEach(a => {
+      if (a && a.teamId) {
+        actualMap.set(a.teamId.trim().toUpperCase(), Number(a.rank));
+      }
+    });
+
     predicted.forEach((teamId, index) => {
+      if (!teamId) return;
+      
       const predictedRank = index + 1;
-      const actualEntry = actual.find(a => a.teamId === teamId);
-      if (actualEntry && Number(predictedRank) === Number(actualEntry.rank)) {
+      const normalizedId = teamId.trim().toUpperCase();
+      const actualRank = actualMap.get(normalizedId);
+      
+      if (actualRank !== undefined && Number(predictedRank) === Number(actualRank)) {
         // Exact match: points based on rank (1st = 10, 10th = 1)
         weightedPoints += (11 - predictedRank);
         correctCount += 1;
@@ -596,7 +615,6 @@ function AppContent() {
     });
     
     // Composite score: correctCount is primary, weightedPoints is secondary
-    // Max weightedPoints is 55, so 1000 is a very safe multiplier
     const score = (correctCount * 1000) + weightedPoints;
     
     return { score, correctCount, weightedPoints };
@@ -664,6 +682,8 @@ function AppContent() {
   const parseAdminRankings = (text: string): RankingEntry[] | null => {
     const lines = text.trim().split('\n');
     const newRankings: RankingEntry[] = [];
+    const seenTeams = new Set<string>();
+    const seenRanks = new Set<number>();
     
     lines.forEach(line => {
       const parts = line.trim().split(/\s+/);
@@ -671,9 +691,16 @@ function AppContent() {
         const rankStr = parts[0].replace(/[^0-9]/g, '');
         const teamName = parts[1];
         const rank = parseInt(rankStr, 10);
-        const team = TEAMS.find(t => t.short === teamName || t.name.includes(teamName));
-        if (team && !isNaN(rank)) {
+        
+        // Robust team matching
+        const team = TEAMS.find(t => t.short === teamName) || 
+                     TEAMS.find(t => t.name === teamName) ||
+                     TEAMS.find(t => t.name.includes(teamName));
+                     
+        if (team && !isNaN(rank) && !seenTeams.has(team.id) && !seenRanks.has(rank)) {
           newRankings.push({ teamId: team.id, rank });
+          seenTeams.add(team.id);
+          seenRanks.add(rank);
         }
       }
     });
@@ -1216,8 +1243,23 @@ function AppContent() {
                             <div className="col-span-4 text-right">
                               <div className="flex flex-col items-end">
                                 <div className="flex items-baseline gap-1">
-                                  <span className="text-xl font-black text-blue-400 font-mono tracking-tighter">{pred.correctCount}</span>
-                                  <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">HIT</span>
+                                  {(() => {
+                                    const liveResult = calculateScore(pred.rankings, currentRankings);
+                                    const isSyncError = liveResult.correctCount !== pred.correctCount;
+                                    return (
+                                      <div className="flex items-baseline gap-1">
+                                        <span className={cn(
+                                          "text-xl font-black font-mono tracking-tighter",
+                                          isSyncError ? "text-yellow-500" : "text-blue-400"
+                                        )}>
+                                          {pred.correctCount}
+                                        </span>
+                                        <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                                          HIT{isSyncError && <span className="text-[8px] ml-0.5 opacity-70">(Sync)</span>}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-1">
                                   <div className="flex -space-x-1">
@@ -1285,24 +1327,47 @@ function AppContent() {
                   className="w-full p-4 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all h-48 font-mono text-sm mb-4 placeholder:text-zinc-600"
                 />
 
-                <div className="flex gap-4 mb-6">
+                <div className="flex flex-col gap-4 mb-6">
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={handleExtractRankings}
+                      className="flex-1 py-4 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                    >
+                      순위 추출하기
+                    </button>
+                    <button 
+                      onClick={updateOfficialRankings}
+                      disabled={!extractedRankings}
+                      className={cn(
+                        "flex-1 py-4 rounded-xl font-bold transition-all shadow-lg",
+                        extractedRankings 
+                          ? "bg-purple-600 text-white hover:bg-purple-700" 
+                          : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
+                      )}
+                    >
+                      공식 순위 업데이트
+                    </button>
+                  </div>
                   <button 
-                    onClick={handleExtractRankings}
-                    className="flex-1 py-4 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-xl font-bold hover:bg-zinc-700 transition-all"
+                    onClick={async () => {
+                      if (currentRankings.length === 10) {
+                        const confirm = window.confirm("모든 예측의 점수를 현재 순위 기준으로 재계산하시겠습니까?");
+                        if (confirm) {
+                          const allPreds = await getDocs(collection(db, 'predictions'));
+                          for (const p of allPreds.docs) {
+                            const data = p.data();
+                            const { score, correctCount, weightedPoints } = calculateScore(data.rankings, currentRankings);
+                            await updateDoc(doc(db, 'predictions', p.id), { score, correctCount, weightedPoints });
+                          }
+                          alert("전체 재계산이 완료되었습니다.");
+                        }
+                      }
+                    }}
+                    disabled={currentRankings.length !== 10}
+                    className="w-full py-3 bg-zinc-900 text-zinc-500 border border-zinc-800 rounded-xl font-bold hover:bg-zinc-800 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-widest"
                   >
-                    순위 추출하기
-                  </button>
-                  <button 
-                    onClick={updateOfficialRankings}
-                    disabled={!extractedRankings}
-                    className={cn(
-                      "flex-1 py-4 rounded-xl font-bold transition-all shadow-lg",
-                      extractedRankings 
-                        ? "bg-purple-600 text-white hover:bg-purple-700" 
-                        : "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-                    )}
-                  >
-                    공식 순위 업데이트
+                    <Calculator size={14} />
+                    전체 데이터 재계산 (동기화)
                   </button>
                 </div>
 
@@ -1605,7 +1670,8 @@ function AppContent() {
               <div className="p-6 space-y-2 max-h-[60vh] overflow-y-auto">
                 {selectedPrediction.rankings.map((teamId, idx) => {
                   const team = getTeam(teamId);
-                  const actualEntry = currentRankings.find(a => a.teamId === teamId);
+                  const normalizedId = teamId.trim().toUpperCase();
+                  const actualEntry = currentRankings.find(a => a.teamId.trim().toUpperCase() === normalizedId);
                   const isCorrect = actualEntry && Number(actualEntry.rank) === idx + 1;
                   return (
                     <div 
