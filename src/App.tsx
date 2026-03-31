@@ -471,7 +471,12 @@ function AppContent() {
 
   useEffect(() => {
     // Fetch Approved Predictions for Leaderboard
-    const q = query(collection(db, 'predictions'), where('status', '==', 'approved'), orderBy('score', 'desc'));
+    const q = query(
+      collection(db, 'predictions'), 
+      where('status', '==', 'approved'), 
+      orderBy('score', 'desc'),
+      orderBy('createdAt', 'asc')
+    );
     const unsub = onSnapshot(q, (snapshot) => {
       const preds = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Prediction));
       setPredictions(preds);
@@ -583,7 +588,7 @@ function AppContent() {
     predicted.forEach((teamId, index) => {
       const predictedRank = index + 1;
       const actualEntry = actual.find(a => a.teamId === teamId);
-      if (actualEntry && predictedRank === actualEntry.rank) {
+      if (actualEntry && Number(predictedRank) === Number(actualEntry.rank)) {
         // Exact match: points based on rank (1st = 10, 10th = 1)
         weightedPoints += (11 - predictedRank);
         correctCount += 1;
@@ -591,8 +596,8 @@ function AppContent() {
     });
     
     // Composite score: correctCount is primary, weightedPoints is secondary
-    // Max weightedPoints is 55, so 100 is a safe multiplier
-    const score = (correctCount * 100) + weightedPoints;
+    // Max weightedPoints is 55, so 1000 is a very safe multiplier
+    const score = (correctCount * 1000) + weightedPoints;
     
     return { score, correctCount, weightedPoints };
   };
@@ -1601,7 +1606,7 @@ function AppContent() {
                 {selectedPrediction.rankings.map((teamId, idx) => {
                   const team = getTeam(teamId);
                   const actualEntry = currentRankings.find(a => a.teamId === teamId);
-                  const isCorrect = actualEntry && actualEntry.rank === idx + 1;
+                  const isCorrect = actualEntry && Number(actualEntry.rank) === idx + 1;
                   return (
                     <div 
                       key={teamId} 
