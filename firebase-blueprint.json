@@ -24,10 +24,12 @@
         },
         "status": { "type": "string", "enum": ["pending", "approved"] },
         "score": { "type": "number" },
+        "correctCount": { "type": "integer" },
+        "weightedPoints": { "type": "integer" },
         "userId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "rankings", "status", "userId", "createdAt"]
+      "required": ["name", "rankings", "status", "userId", "createdAt", "correctCount", "weightedPoints"]
     },
     "CurrentRanking": {
       "title": "CurrentRanking",
@@ -66,7 +68,8 @@
           }
         },
         "date": { "type": "string", "format": "date-time" },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "deleted": { "type": "boolean" }
       },
       "required": ["rankings", "date", "createdAt"]
     }

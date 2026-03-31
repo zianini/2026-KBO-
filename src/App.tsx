@@ -104,6 +104,45 @@ const TEAM_SLOGANS: Record<string, string> = {
   'KIWOOM': "고척 돔에 핀 영웅들의 투혼, 모두를 놀라게 할 '언더독'의 반란"
 };
 
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const sortedPayload = [...payload].sort((a, b) => a.value - b.value);
+    const groupedByRank: { [key: number]: any[] } = {};
+    sortedPayload.forEach(item => {
+      if (!groupedByRank[item.value]) {
+        groupedByRank[item.value] = [];
+      }
+      groupedByRank[item.value].push(item);
+    });
+
+    return (
+      <div className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl shadow-2xl">
+        <p className="text-[10px] text-zinc-500 font-bold mb-2 uppercase tracking-widest">{label}</p>
+        <div className="space-y-1.5">
+          {Object.entries(groupedByRank).map(([rank, items]) => (
+            <div key={rank} className="flex items-center gap-2">
+              <span className="text-xs font-black text-white w-6">{rank}위</span>
+              <div className="flex flex-wrap gap-1 max-w-[200px]">
+                {items.map((item, idx) => (
+                  <span 
+                    key={idx} 
+                    className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                    style={{ backgroundColor: `${item.color}20`, color: item.color, border: `1px solid ${item.color}40` }}
+                  >
+                    {item.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+
 const DEFAULT_RANKING = [
   'LG', 'HANWHA', 'SSG', 'SAMSUNG', 'NC', 'KT', 'LOTTE', 'KIA', 'DOOSAN', 'KIWOOM'
 ];
@@ -136,6 +175,8 @@ interface Prediction {
   rankings: string[];
   status: 'pending' | 'approved';
   score: number;
+  correctCount: number;
+  weightedPoints: number;
   userId: string;
   createdAt: any;
 }
@@ -286,6 +327,17 @@ function AppContent() {
   const [extractedRankings, setExtractedRankings] = useState<RankingEntry[] | null>(null);
   const [adminRankingsText, setAdminRankingsText] = useState("");
   const [visitorCount, setVisitorCount] = useState<number>(0);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -468,19 +520,31 @@ function AppContent() {
   }, []);
 
   const chartData = useMemo(() => {
-    // Group by date to avoid multiple points on the same day if needed, 
-    // but for now let's just show all points in order.
-    return historicalRankings.map(h => {
+    const sortedRankings = [...historicalRankings]
+      .filter(h => !h.deleted)
+      .sort((a, b) => {
+        const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+        const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+        return dateA.getTime() - dateB.getTime();
+      });
+
+    const grouped = new Map<string, any>();
+    
+    sortedRankings.forEach(h => {
       const date = h.date?.toDate ? h.date.toDate() : new Date(h.date);
       const formattedDate = `${date.getMonth() + 1}.${date.getDate()}`;
+      
       const entry: any = { date: formattedDate, fullDate: date.toLocaleString() };
       h.rankings.forEach((r: any) => {
         const teamId = typeof r === 'string' ? r : r.teamId;
         const rank = typeof r === 'string' ? (h.rankings.indexOf(r) + 1) : r.rank;
         entry[teamId] = rank;
       });
-      return entry;
+      
+      grouped.set(formattedDate, entry);
     });
+    
+    return Array.from(grouped.values());
   }, [historicalRankings]);
 
   const handleLogin = async () => {
@@ -514,26 +578,36 @@ function AppContent() {
   };
 
   const calculateScore = (predicted: string[], actual: RankingEntry[]) => {
-    let score = 0;
+    let weightedPoints = 0;
+    let correctCount = 0;
     predicted.forEach((teamId, index) => {
       const predictedRank = index + 1;
       const actualEntry = actual.find(a => a.teamId === teamId);
       if (actualEntry && predictedRank === actualEntry.rank) {
         // Exact match: points based on rank (1st = 10, 10th = 1)
-        score += (11 - predictedRank);
+        weightedPoints += (11 - predictedRank);
+        correctCount += 1;
       }
     });
-    return score;
+    
+    // Composite score: correctCount is primary, weightedPoints is secondary
+    // Max weightedPoints is 55, so 100 is a safe multiplier
+    const score = (correctCount * 100) + weightedPoints;
+    
+    return { score, correctCount, weightedPoints };
   };
 
   const submitPrediction = async () => {
     try {
+      const { score, correctCount, weightedPoints } = calculateScore(predictRankings, currentRankings);
       await addDoc(collection(db, 'predictions'), {
         name: predictName || "익명",
         message: predictMessage,
         rankings: predictRankings,
         status: 'pending',
-        score: calculateScore(predictRankings, currentRankings),
+        score,
+        correctCount,
+        weightedPoints,
         userId: user?.uid || null,
         createdAt: Timestamp.now()
       });
@@ -567,11 +641,19 @@ function AppContent() {
   };
 
   const rejectPrediction = async (pred: Prediction) => {
-    try {
-      await deleteDoc(doc(db, 'predictions', pred.id));
-    } catch (e) {
-      console.error('Delete error:', e);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: "예측 거절",
+      message: `${pred.name}님의 예측을 정말로 거절하시겠습니까? 이 작업은 되돌릴 수 없습니다.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'predictions', pred.id));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (e) {
+          console.error('Reject error:', e);
+        }
+      }
+    });
   };
 
   const parseAdminRankings = (text: string): RankingEntry[] | null => {
@@ -621,19 +703,47 @@ function AppContent() {
     await addDoc(collection(db, 'historicalRankings'), {
       rankings: parsed,
       date: Timestamp.now(),
-      createdAt: Timestamp.now()
+      createdAt: Timestamp.now(),
+      deleted: false
     });
     
     // Recalculate all scores
     const allPreds = await getDocs(collection(db, 'predictions'));
     for (const p of allPreds.docs) {
       const data = p.data();
-      const newScore = calculateScore(data.rankings, parsed);
-      await updateDoc(doc(db, 'predictions', p.id), { score: newScore });
+      const { score, correctCount, weightedPoints } = calculateScore(data.rankings, parsed);
+      await updateDoc(doc(db, 'predictions', p.id), { score, correctCount, weightedPoints });
     }
     setAdminRankingsText("");
     setExtractedRankings(null);
     alert("공식 순위가 성공적으로 업데이트되었습니다.");
+  };
+
+  const deleteHistoricalRanking = async (h: any) => {
+    const date = h.date?.toDate ? h.date.toDate() : new Date(h.date);
+    const dateStr = `${date.getMonth() + 1}월 ${date.getDate()}일`;
+    
+    setConfirmModal({
+      isOpen: true,
+      title: "기록 삭제",
+      message: `정말로 ${dateStr} 자료를 삭제하시겠습니까? 삭제된 자료는 관리 페이지 하단에서 복구할 수 있습니다.`,
+      onConfirm: async () => {
+        try {
+          await updateDoc(doc(db, 'historicalRankings', h.id), { deleted: true });
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (e) {
+          console.error('Delete error:', e);
+        }
+      }
+    });
+  };
+
+  const restoreHistoricalRanking = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'historicalRankings', id), { deleted: false });
+    } catch (e) {
+      console.error('Restore error:', e);
+    }
   };
 
   const getTeam = (id: string) => TEAMS.find(t => t.id === id);
@@ -925,11 +1035,7 @@ function AppContent() {
                           tickLine={false}
                           axisLine={false}
                         />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: '12px' }}
-                          itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
-                          labelStyle={{ color: '#999', marginBottom: '4px', fontSize: '10px' }}
-                        />
+                        <Tooltip content={<CustomTooltip />} />
                         <Legend 
                           iconType="circle" 
                           wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }}
@@ -1031,80 +1137,118 @@ function AppContent() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="space-y-4"
+              className="space-y-6"
             >
-              <div className="bg-zinc-900 rounded-2xl shadow-xl overflow-hidden border border-zinc-800">
-                <div className="bg-blue-900 px-6 py-4 text-white text-center border-b border-blue-800">
-                  <div className="flex items-center justify-center gap-3">
-                    <Trophy size={24} className="text-yellow-400" />
-                    <h2 className="text-xl font-black">예측 리더보드</h2>
-                  </div>
-                  <p className="text-blue-200 text-xs mt-1">정확한 순위 예측으로 점수를 획득하세요!</p>
+              <div className="bg-zinc-900 rounded-3xl shadow-2xl overflow-hidden border border-zinc-800/50">
+                <div className="bg-gradient-to-br from-blue-900/40 to-zinc-900 px-8 py-10 text-center border-b border-zinc-800">
+                  <motion.div 
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 mb-4 border border-blue-500/30"
+                  >
+                    <Trophy size={32} className="text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.4)]" />
+                  </motion.div>
+                  <h2 className="text-3xl font-black text-white tracking-tight mb-2">예측 리더보드</h2>
+                  <p className="text-zinc-400 text-sm font-medium">정확한 순위 예측으로 돗자리 도사가 되어보세요!</p>
                 </div>
                 
-                <div className="divide-y divide-zinc-800">
-                  {predictions.length > 0 ? (
-                    predictions.map((pred, idx) => {
-                      const displayRank = predictions.findIndex(p => p.score === pred.score) + 1;
-                      return (
-                        <div 
-                          key={pred.id} 
-                          onClick={() => setSelectedPrediction(pred)}
-                          className={cn(
-                            "p-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors cursor-pointer group",
-                            user?.uid === pred.userId && "bg-blue-600/10 border-l-4 border-blue-500"
-                          )}
-                        >
-                          <div className="flex items-center gap-4">
-                            <span className={cn(
-                              "w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm",
-                              displayRank === 1 ? "bg-yellow-500 text-black" : 
-                              displayRank === 2 ? "bg-zinc-300 text-black" :
-                              displayRank === 3 ? "bg-amber-600 text-white" : "bg-zinc-800 text-zinc-500"
-                            )}>
-                              {displayRank}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 mb-0.5">
-                                <p className="font-bold text-white group-hover:text-blue-400 transition-colors truncate">{pred.name}</p>
-                                <span className="text-[9px] text-zinc-600 font-medium bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-800">
+                <div className="p-2 sm:p-4">
+                  <div className="grid grid-cols-12 px-4 py-3 text-[10px] font-black text-zinc-500 uppercase tracking-widest border-b border-zinc-800/50 mb-2">
+                    <div className="col-span-2">순위</div>
+                    <div className="col-span-6">참가자</div>
+                    <div className="col-span-4 text-right">스코어</div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {predictions.length > 0 ? (
+                      predictions.map((pred, idx) => {
+                        const displayRank = predictions.findIndex(p => p.score === pred.score) + 1;
+                        const isMe = user?.uid === pred.userId;
+                        
+                        return (
+                          <motion.div 
+                            key={pred.id} 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: idx * 0.05 }}
+                            onClick={() => setSelectedPrediction(pred)}
+                            className={cn(
+                              "grid grid-cols-12 items-center p-4 rounded-2xl transition-all cursor-pointer group relative overflow-hidden",
+                              isMe ? "bg-blue-600/10 border border-blue-500/30" : "bg-zinc-800/30 hover:bg-zinc-800/60 border border-transparent hover:border-zinc-700"
+                            )}
+                          >
+                            {/* Rank Column */}
+                            <div className="col-span-2 flex items-center">
+                              <span className={cn(
+                                "w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm transition-transform group-hover:scale-110",
+                                displayRank === 1 ? "bg-yellow-500 text-black shadow-[0_0_20px_rgba(234,179,8,0.3)]" : 
+                                displayRank === 2 ? "bg-zinc-300 text-black" :
+                                displayRank === 3 ? "bg-amber-600 text-white" : "bg-zinc-800/80 text-zinc-400"
+                              )}>
+                                {displayRank}
+                              </span>
+                            </div>
+
+                            {/* User Info Column */}
+                            <div className="col-span-6 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="font-black text-white group-hover:text-blue-400 transition-colors truncate text-base">
+                                  {pred.name}
+                                </p>
+                                {isMe && (
+                                  <span className="text-[8px] font-black bg-blue-500 text-white px-1.5 py-0.5 rounded-full uppercase tracking-tighter">ME</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-zinc-500 font-bold bg-zinc-900/50 px-2 py-0.5 rounded border border-zinc-800">
                                   {formatDate(pred.createdAt)}
                                 </span>
-                              </div>
-                              <p className="text-[10px] text-zinc-500 truncate max-w-[180px] sm:max-w-xs italic">"{getPredictionMessage(pred, true)}"</p>
-                            </div>
-                          </div>
-                          <div className="text-right flex-shrink-0 flex items-center gap-3">
-                            <div>
-                              <p className="text-xl font-black text-blue-400">{pred.score}점</p>
-                              <div className="flex gap-0.5 mt-1 justify-end">
-                                {pred.rankings.slice(0, 5).map((id) => (
-                                  <div key={id} className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getTeam(id)?.color }} />
-                                ))}
+                                <p className="text-[10px] text-zinc-500 truncate italic opacity-60">"{getPredictionMessage(pred, true)}"</p>
                               </div>
                             </div>
+
+                            {/* Score Column */}
+                            <div className="col-span-4 text-right">
+                              <div className="flex flex-col items-end">
+                                <div className="flex items-baseline gap-1">
+                                  <span className="text-xl font-black text-blue-400 font-mono tracking-tighter">{pred.correctCount}</span>
+                                  <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">HIT</span>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  <div className="flex -space-x-1">
+                                    {pred.rankings.slice(0, 3).map((id) => (
+                                      <div key={id} className="w-2 h-2 rounded-full border border-zinc-900" style={{ backgroundColor: getTeam(id)?.color }} />
+                                    ))}
+                                  </div>
+                                  <span className="text-[10px] font-mono font-bold text-zinc-500">{pred.weightedPoints}pts</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Admin Delete Button */}
                             {profile?.role === 'admin' && (
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  rejectPrediction(pred);
-                                }}
-                                className="p-2 hover:bg-red-600/20 text-red-500 rounded-lg transition-colors"
-                                title="삭제"
-                              >
-                                <X size={16} />
-                              </button>
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    rejectPrediction(pred);
+                                  }}
+                                  className="p-2 bg-red-600/20 text-red-500 rounded-xl hover:bg-red-600 hover:text-white transition-all"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </div>
                             )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="p-12 text-center text-zinc-600">
-                      <Clock size={48} className="mx-auto mb-4 opacity-20" />
-                      <p>아직 승인된 예측이 없습니다.</p>
-                    </div>
-                  )}
+                          </motion.div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-center py-20 bg-zinc-800/10 rounded-3xl border border-dashed border-zinc-800">
+                        <Trophy size={48} className="mx-auto mb-4 text-zinc-800" />
+                        <p className="text-zinc-600 font-black uppercase tracking-widest">리더보드가 비어있습니다</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -1252,6 +1396,84 @@ function AppContent() {
                   )}
                 </div>
               </div>
+
+              {/* Historical Rankings Management */}
+              <div className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800">
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2 text-blue-400">
+                  <Activity />
+                  과거 순위 기록 관리 ({historicalRankings.filter(h => !h.deleted).length})
+                </h2>
+                
+                <div className="space-y-3">
+                  {[...historicalRankings]
+                    .filter(h => !h.deleted)
+                    .reverse()
+                    .map(h => {
+                      const date = h.date?.toDate ? h.date.toDate() : new Date(h.date);
+                      const formattedDate = `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+                      
+                      return (
+                        <div key={h.id} className="p-4 rounded-xl bg-zinc-800 border border-zinc-700 flex justify-between items-center">
+                          <div>
+                            <p className="text-sm font-bold text-white mb-1">{formattedDate}</p>
+                            <div className="flex gap-1">
+                              {h.rankings.slice(0, 10).map((r: any, idx: number) => {
+                                const teamId = typeof r === 'string' ? r : r.teamId;
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className="w-2 h-2 rounded-full" 
+                                    style={{ backgroundColor: getTeam(teamId)?.color }} 
+                                    title={getTeam(teamId)?.short}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => deleteHistoricalRanking(h)}
+                            className="p-2 hover:bg-red-600/20 text-red-500 rounded-lg transition-colors"
+                            title="기록 삭제"
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  {historicalRankings.filter(h => !h.deleted).length === 0 && (
+                    <div className="text-center py-8 text-zinc-600 font-bold">
+                      기록된 과거 순위가 없습니다.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Deleted Rankings (Archive) */}
+              {historicalRankings.some(h => h.deleted) && (
+                <div className="bg-zinc-900 rounded-2xl p-6 shadow-xl border border-zinc-800 border-dashed opacity-60">
+                  <h2 className="text-xl font-bold mb-6 flex items-center gap-2 text-zinc-500">
+                    <Clock />
+                    삭제된 기록 보관함 ({historicalRankings.filter(h => h.deleted).length})
+                  </h2>
+                  <div className="space-y-3">
+                    {historicalRankings.filter(h => h.deleted).map(h => {
+                      const date = h.date?.toDate ? h.date.toDate() : new Date(h.date);
+                      const formattedDate = `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+                      return (
+                        <div key={h.id} className="p-3 rounded-xl bg-zinc-900/50 border border-zinc-800 flex justify-between items-center">
+                          <span className="text-xs text-zinc-500">{formattedDate} 삭제됨</span>
+                          <button 
+                            onClick={() => restoreHistoricalRanking(h.id)}
+                            className="text-[10px] font-black text-blue-500 hover:text-blue-400 uppercase tracking-widest"
+                          >
+                            복구하기
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -1290,6 +1512,49 @@ function AppContent() {
           방문 <span className="text-blue-400">{visitorCount.toLocaleString()}</span>
         </span>
       </div>
+
+      {/* Custom Confirmation Modal */}
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-3xl p-8 shadow-2xl"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-red-600/20 flex items-center justify-center mb-6 mx-auto border border-red-500/30">
+                <AlertCircle size={32} className="text-red-500" />
+              </div>
+              <h3 className="text-2xl font-black text-white text-center mb-2">{confirmModal.title}</h3>
+              <p className="text-zinc-400 text-center mb-8 font-medium leading-relaxed">
+                {confirmModal.message}
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 py-4 bg-zinc-800 text-zinc-400 rounded-2xl font-bold hover:bg-zinc-700 transition-all"
+                >
+                  취소
+                </button>
+                <button 
+                  onClick={confirmModal.onConfirm}
+                  className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 shadow-lg shadow-red-900/20 transition-all"
+                >
+                  삭제하기
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       {/* Prediction Detail Modal */}
       <AnimatePresence>
         {selectedPrediction && (
@@ -1371,8 +1636,17 @@ function AppContent() {
                 })}
               </div>
               <div className="p-6 bg-zinc-800/50 text-center">
-                <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-1">총 획득 점수</p>
-                <p className="text-4xl font-black text-blue-400">{selectedPrediction.score}점</p>
+                <div className="flex justify-center gap-12">
+                  <div>
+                    <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">적중 개수</p>
+                    <p className="text-3xl font-black text-white italic">{selectedPrediction.correctCount}개</p>
+                  </div>
+                  <div className="w-px h-10 bg-zinc-700 self-center" />
+                  <div>
+                    <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">가중치 점수</p>
+                    <p className="text-3xl font-black text-blue-400 italic">{selectedPrediction.weightedPoints}점</p>
+                  </div>
+                </div>
               </div>
               <button 
                 onClick={() => setSelectedPrediction(null)}

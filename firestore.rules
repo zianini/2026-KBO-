@@ -20,6 +20,8 @@ service cloud.firestore {
     //   - rankings: list of strings
     //   - status: string (pending, approved)
     //   - score: number
+    //   - correctCount: number
+    //   - weightedPoints: number
     //   - userId: string
     //   - createdAt: timestamp
     //
@@ -68,13 +70,15 @@ service cloud.firestore {
     }
 
     function isValidPrediction(data) {
-      return data.keys().hasAll(['name', 'rankings', 'status', 'createdAt']) &&
-             data.keys().hasOnly(['name', 'message', 'rankings', 'status', 'score', 'userId', 'createdAt']) &&
+      return data.keys().hasAll(['name', 'rankings', 'status', 'createdAt', 'correctCount', 'weightedPoints']) &&
+             data.keys().hasOnly(['name', 'message', 'rankings', 'status', 'score', 'correctCount', 'weightedPoints', 'userId', 'createdAt']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              (data.message == null || (data.message is string && data.message.size() < 500)) &&
              data.rankings is list && data.rankings.size() == 10 &&
              data.status in ['pending', 'approved'] &&
              (data.score == null || data.score is number) &&
+             data.correctCount is number &&
+             data.weightedPoints is number &&
              (data.userId == null || data.userId is string) &&
              data.createdAt is timestamp;
     }
@@ -86,10 +90,12 @@ service cloud.firestore {
     }
 
     function isValidHistoricalRanking(data) {
-      return data.keys().hasOnly(['rankings', 'date', 'createdAt']) &&
+      return data.keys().hasAll(['rankings', 'date', 'createdAt']) &&
+             data.keys().hasOnly(['rankings', 'date', 'createdAt', 'deleted']) &&
              data.rankings is list && data.rankings.size() == 10 &&
              data.date is timestamp &&
-             data.createdAt is timestamp;
+             data.createdAt is timestamp &&
+             (!('deleted' in data) || data.deleted is bool);
     }
 
     // ===============================================================
