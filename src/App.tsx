@@ -683,28 +683,29 @@ function AppContent() {
     const lines = text.trim().split('\n');
     const newRankings: RankingEntry[] = [];
     const seenTeams = new Set<string>();
-    const seenRanks = new Set<number>();
     
     lines.forEach(line => {
+      // Split by any whitespace (including tabs)
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 2) {
         const rankStr = parts[0].replace(/[^0-9]/g, '');
         const teamName = parts[1];
         const rank = parseInt(rankStr, 10);
         
-        // Robust team matching
+        // Robust team matching: check short name first, then full name
         const team = TEAMS.find(t => t.short === teamName) || 
                      TEAMS.find(t => t.name === teamName) ||
+                     TEAMS.find(t => t.id === teamName.toUpperCase()) ||
                      TEAMS.find(t => t.name.includes(teamName));
                      
-        if (team && !isNaN(rank) && !seenTeams.has(team.id) && !seenRanks.has(rank)) {
+        if (team && !isNaN(rank) && !seenTeams.has(team.id)) {
           newRankings.push({ teamId: team.id, rank });
           seenTeams.add(team.id);
-          seenRanks.add(rank);
         }
       }
     });
 
+    // We need exactly 10 unique teams
     if (newRankings.length === 10) {
       return newRankings;
     }
