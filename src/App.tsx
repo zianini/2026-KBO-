@@ -68,7 +68,9 @@ import {
   Activity,
   Users,
   RefreshCw,
-  Calculator
+  Calculator,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -81,16 +83,16 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Constants ---
 const TEAMS = [
-  { id: 'LG', name: 'LG 트윈스', short: 'LG', color: '#C40026' },
-  { id: 'HANWHA', name: '한화 이글스', short: '한화', color: '#FF6600' },
-  { id: 'SSG', name: 'SSG 랜더스', short: 'SSG', color: '#CE0E2D' },
-  { id: 'SAMSUNG', name: '삼성 라이온즈', short: '삼성', color: '#074CA1' },
-  { id: 'NC', name: 'NC 다이노스', short: 'NC', color: '#00275A' },
-  { id: 'KT', name: 'kt wiz', short: 'KT', color: '#000000' },
-  { id: 'LOTTE', name: '롯데 자이언츠', short: '롯데', color: '#002955' },
-  { id: 'KIA', name: 'KIA 타이거즈', short: 'KIA', color: '#C70125' },
-  { id: 'DOOSAN', name: '두산 베어스', short: '두산', color: '#131230' },
-  { id: 'KIWOOM', name: '키움 히어로즈', short: '키움', color: '#820024' },
+  { id: 'LG', name: 'LG 트윈스', short: 'LG', color: '#C40026', dash: '0' },
+  { id: 'HANWHA', name: '한화 이글스', short: '한화', color: '#FF6600', dash: '0' },
+  { id: 'SSG', name: 'SSG 랜더스', short: 'SSG', color: '#CE0E2D', dash: '5 5' },
+  { id: 'SAMSUNG', name: '삼성 라이온즈', short: '삼성', color: '#074CA1', dash: '0' },
+  { id: 'NC', name: 'NC 다이노스', short: 'NC', color: '#00275A', dash: '5 5' },
+  { id: 'KT', name: 'kt wiz', short: 'KT', color: '#000000', dash: '0' },
+  { id: 'LOTTE', name: '롯데 자이언츠', short: '롯데', color: '#002955', dash: '10 5' },
+  { id: 'KIA', name: 'KIA 타이거즈', short: 'KIA', color: '#C70125', dash: '10 5' },
+  { id: 'DOOSAN', name: '두산 베어스', short: '두산', color: '#131230', dash: '0' },
+  { id: 'KIWOOM', name: '키움 히어로즈', short: '키움', color: '#820024', dash: '0' },
 ];
 
 const TEAM_SLOGANS: Record<string, string> = {
@@ -317,6 +319,7 @@ function AppContent() {
   const [myPrediction, setMyPrediction] = useState<Prediction | null>(null);
   const [view, setView] = useState<'home' | 'predict' | 'leaderboard' | 'admin'>('home');
   const [selectedPrediction, setSelectedPrediction] = useState<Prediction | null>(null);
+  const [visibleTeams, setVisibleTeams] = useState<string[]>(TEAMS.map(t => t.id));
   
   // Prediction Form
   const [predictName, setPredictName] = useState("");
@@ -550,9 +553,27 @@ function AppContent() {
       
       grouped.set(formattedDate, entry);
     });
+
+    // Add current live ranking as the last point
+    if (currentRankings.length === 10) {
+      const now = new Date();
+      const formattedNow = `${now.getMonth() + 1}.${now.getDate()}`;
+      
+      // Only add if not already present or if we want to show it as "현재"
+      const liveEntry: any = { date: "현재", fullDate: now.toLocaleString() };
+      currentRankings.forEach(r => {
+        liveEntry[r.teamId] = r.rank;
+      });
+      
+      // If today's data already exists, we can either overwrite it or add "현재"
+      // Adding "현재" as a separate point at the end is better for clarity
+      const dataArray = Array.from(grouped.values());
+      dataArray.push(liveEntry);
+      return dataArray;
+    }
     
     return Array.from(grouped.values());
-  }, [historicalRankings]);
+  }, [historicalRankings, currentRankings]);
 
   const handleLogin = async () => {
     try {
@@ -1044,10 +1065,48 @@ function AppContent() {
               {/* Ranking Trends Graph */}
               {historicalRankings.length > 1 && (
                 <div className="mt-12 bg-zinc-900 rounded-2xl p-6 border border-zinc-800 shadow-xl">
-                  <div className="flex items-center gap-2 mb-6">
-                    <Activity className="text-blue-400" />
-                    <h2 className="text-xl font-bold text-white">순위 변동 추이 (3/28 이후)</h2>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                    <div className="flex items-center gap-2">
+                      <Activity className="text-blue-400" />
+                      <h2 className="text-xl font-bold text-white">순위 변동 추이 (3/28 이후)</h2>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button 
+                        onClick={() => setVisibleTeams(visibleTeams.length === TEAMS.length ? [] : TEAMS.map(t => t.id))}
+                        className="text-[10px] font-black px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white transition-colors uppercase tracking-widest"
+                      >
+                        {visibleTeams.length === TEAMS.length ? "전체 해제" : "전체 선택"}
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Team Toggles */}
+                  <div className="flex flex-wrap gap-2 mb-8 p-3 bg-zinc-950/50 rounded-xl border border-zinc-800/50">
+                    {TEAMS.map(team => {
+                      const isVisible = visibleTeams.includes(team.id);
+                      return (
+                        <button
+                          key={team.id}
+                          onClick={() => {
+                            setVisibleTeams(prev => 
+                              isVisible ? prev.filter(id => id !== team.id) : [...prev, team.id]
+                            );
+                          }}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all border",
+                            isVisible 
+                              ? "bg-zinc-800 border-zinc-600 text-white shadow-sm" 
+                              : "bg-transparent border-zinc-800 text-zinc-600 grayscale opacity-50 hover:opacity-80"
+                          )}
+                          style={isVisible ? { borderLeft: `3px solid ${team.color}` } : {}}
+                        >
+                          {isVisible ? <Eye size={12} /> : <EyeOff size={12} />}
+                          {team.short}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <div className="h-[400px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
@@ -1073,7 +1132,7 @@ function AppContent() {
                           iconType="circle" 
                           wrapperStyle={{ paddingTop: '20px', fontSize: '12px' }}
                         />
-                        {TEAMS.map(team => (
+                        {TEAMS.filter(t => visibleTeams.includes(t.id)).map(team => (
                           <Line 
                             key={team.id}
                             type="monotone" 
@@ -1081,6 +1140,7 @@ function AppContent() {
                             name={team.short}
                             stroke={team.color} 
                             strokeWidth={3}
+                            strokeDasharray={(team as any).dash}
                             dot={{ r: 4, fill: team.color, strokeWidth: 0 }}
                             activeDot={{ r: 6, strokeWidth: 0 }}
                             connectNulls
