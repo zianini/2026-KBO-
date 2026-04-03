@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useMemo, Component } from 'react';
 import { 
   DndContext, 
   closestCenter,
@@ -79,6 +80,57 @@ import { twMerge } from 'tailwind-merge';
 // --- Utilities ---
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
 }
 
 // --- Constants ---
@@ -232,82 +284,7 @@ const SortableItem = ({ id, team, index }: SortableItemProps) => {
   );
 };
 
-// --- Error Handling ---
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: any;
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-class ErrorBoundary extends (React.Component as any) {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: any) {
-    return { hasError: true, error };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-black p-4">
-          <div className="bg-zinc-900 p-8 rounded-2xl shadow-xl max-w-md w-full text-center border border-zinc-800">
-            <AlertCircle className="mx-auto text-red-500 mb-4" size={64} />
-            <h2 className="text-2xl font-bold text-white mb-2">문제가 발생했습니다</h2>
-            <p className="text-zinc-400 mb-6">앱을 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.</p>
-            <pre className="text-xs bg-zinc-800 p-4 rounded-lg overflow-auto text-left mb-6 max-h-40 text-zinc-300">
-              {this.state.error?.message || "알 수 없는 오류"}
-            </pre>
-            <button 
-              onClick={() => window.location.reload()}
-              className="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all"
-            >
-              새로고침
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 export default function App() {
-  return (
-    <ErrorBoundary>
-      <AppContent />
-    </ErrorBoundary>
-  );
-}
-
-function AppContent() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -331,6 +308,7 @@ function AppContent() {
   const [historicalRankings, setHistoricalRankings] = useState<any[]>([]);
   const [extractedRankings, setExtractedRankings] = useState<RankingEntry[] | null>(null);
   const [adminRankingsText, setAdminRankingsText] = useState("");
+  const [adminDate, setAdminDate] = useState("");
   const [visitorCount, setVisitorCount] = useState<number>(0);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -361,19 +339,6 @@ function AppContent() {
       setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
     }, 10000);
     return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const testConnection = async () => {
-      try {
-        await getDocFromServer(doc(db, 'settings', 'connection_test'));
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration.");
-        }
-      }
-    };
-    testConnection();
   }, []);
 
   useEffect(() => {
@@ -452,6 +417,8 @@ function AppContent() {
       if (doc.exists()) {
         setVisitorCount(doc.data().count);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'visitors/stats');
     });
     return () => unsub();
   }, []);
@@ -470,6 +437,8 @@ function AppContent() {
           setCurrentRankings(rawRankings);
         }
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/currentRanking');
     });
     return () => unsub();
   }, []);
@@ -485,6 +454,8 @@ function AppContent() {
     const unsub = onSnapshot(q, (snapshot) => {
       const preds = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Prediction));
       setPredictions(preds);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'predictions (approved)');
     });
     return () => unsub();
   }, []);
@@ -499,6 +470,8 @@ function AppContent() {
         } else {
           setMyPrediction(null);
         }
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'predictions (my)');
       });
       return () => unsub();
     }
@@ -510,6 +483,8 @@ function AppContent() {
       const q = query(collection(db, 'predictions'), where('status', '==', 'pending'));
       const unsub = onSnapshot(q, (snapshot) => {
         setPendingPredictions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Prediction)));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'predictions (pending)');
       });
       return () => unsub();
     }
@@ -525,6 +500,8 @@ function AppContent() {
     );
     const unsub = onSnapshot(q, (snapshot) => {
       setHistoricalRankings(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'historicalRankings');
     });
     return () => unsub();
   }, []);
@@ -746,31 +723,39 @@ function AppContent() {
   const updateOfficialRankings = async () => {
     if (!extractedRankings) return;
     const parsed = extractedRankings;
+    const targetDate = adminDate ? new Date(adminDate) : new Date();
+    const isHistoricalOnly = !!adminDate && new Date(adminDate).toDateString() !== new Date().toDateString();
 
-    // Update current ranking
-    await setDoc(doc(db, 'settings', 'currentRanking'), {
-      rankings: parsed,
-      updatedAt: Timestamp.now()
-    });
+    // Update current ranking only if it's not a historical-only insert
+    if (!isHistoricalOnly) {
+      await setDoc(doc(db, 'settings', 'currentRanking'), {
+        rankings: parsed,
+        updatedAt: Timestamp.fromDate(targetDate)
+      });
+    }
 
     // Save to history
     await addDoc(collection(db, 'historicalRankings'), {
       rankings: parsed,
-      date: Timestamp.now(),
+      date: Timestamp.fromDate(targetDate),
       createdAt: Timestamp.now(),
       deleted: false
     });
     
-    // Recalculate all scores
-    const allPreds = await getDocs(collection(db, 'predictions'));
-    for (const p of allPreds.docs) {
-      const data = p.data();
-      const { score, correctCount, weightedPoints } = calculateScore(data.rankings, parsed);
-      await updateDoc(doc(db, 'predictions', p.id), { score, correctCount, weightedPoints });
+    // Recalculate all scores only if it's the current ranking update
+    if (!isHistoricalOnly) {
+      const allPreds = await getDocs(collection(db, 'predictions'));
+      for (const p of allPreds.docs) {
+        const data = p.data();
+        const { score, correctCount, weightedPoints } = calculateScore(data.rankings, parsed);
+        await updateDoc(doc(db, 'predictions', p.id), { score, correctCount, weightedPoints });
+      }
     }
+    
     setAdminRankingsText("");
     setExtractedRankings(null);
-    alert("공식 순위가 성공적으로 업데이트되었습니다.");
+    setAdminDate("");
+    alert(isHistoricalOnly ? "과거 기록이 성공적으로 추가되었습니다." : "공식 순위가 성공적으로 업데이트되었습니다.");
   };
 
   const deleteHistoricalRanking = async (h: any) => {
@@ -1387,6 +1372,23 @@ function AppContent() {
                   placeholder="여기에 순위 데이터를 붙여넣으세요..."
                   className="w-full p-4 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all h-48 font-mono text-sm mb-4 placeholder:text-zinc-600"
                 />
+
+                <div className="mb-6">
+                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
+                    데이터 날짜 지정 (비워두면 현재 시간)
+                  </label>
+                  <input 
+                    type="date"
+                    value={adminDate}
+                    onChange={(e) => setAdminDate(e.target.value)}
+                    className="w-full p-3 rounded-xl bg-zinc-800 border border-zinc-700 text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all text-sm"
+                  />
+                  {adminDate && (
+                    <p className="text-[10px] text-amber-500 mt-2 font-bold">
+                      * 과거 날짜를 선택하면 '기록'으로만 추가되며 현재 순위 및 점수 계산에는 영향을 주지 않습니다.
+                    </p>
+                  )}
+                </div>
 
                 <div className="flex flex-col gap-4 mb-6">
                   <div className="flex gap-4">
