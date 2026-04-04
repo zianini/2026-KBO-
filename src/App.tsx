@@ -536,17 +536,14 @@ export default function App() {
       const now = new Date();
       const formattedNow = `${now.getMonth() + 1}.${now.getDate()}`;
       
-      // Only add if not already present or if we want to show it as "현재"
       const liveEntry: any = { date: "현재", fullDate: now.toLocaleString() };
       currentRankings.forEach(r => {
         liveEntry[r.teamId] = r.rank;
       });
       
-      // If today's data already exists, we can either overwrite it or add "현재"
-      // Adding "현재" as a separate point at the end is better for clarity
-      const dataArray = Array.from(grouped.values());
-      dataArray.push(liveEntry);
-      return dataArray;
+      // If today's data already exists in grouped, replace it with "현재"
+      // This avoids showing both "4.4" and "현재" as separate points
+      grouped.set(formattedNow, liveEntry);
     }
     
     return Array.from(grouped.values());
