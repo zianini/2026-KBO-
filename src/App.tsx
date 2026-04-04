@@ -1050,7 +1050,7 @@ export default function App() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <div className="flex items-center gap-2">
                       <Activity className="text-blue-400" />
-                      <h2 className="text-xl font-bold text-white">순위 변동 추이 (3/28 이후)</h2>
+                      <h2 className="text-xl font-bold text-white">순위 변동 추이</h2>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button 
