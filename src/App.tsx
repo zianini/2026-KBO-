@@ -297,6 +297,7 @@ export default function App() {
   const [view, setView] = useState<'home' | 'predict' | 'leaderboard' | 'admin'>('home');
   const [selectedPrediction, setSelectedPrediction] = useState<Prediction | null>(null);
   const [visibleTeams, setVisibleTeams] = useState<string[]>(TEAMS.map(t => t.id));
+  const [showFullHistory, setShowFullHistory] = useState(false);
   
   // Prediction Form
   const [predictName, setPredictName] = useState("");
@@ -546,8 +547,16 @@ export default function App() {
       grouped.set(formattedNow, liveEntry);
     }
     
-    return Array.from(grouped.values());
-  }, [historicalRankings, currentRankings]);
+    const result = Array.from(grouped.values());
+    
+    // On mobile, default to last 10 points unless full history is toggled
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+    if (isMobile && !showFullHistory && result.length > 10) {
+      return result.slice(-10);
+    }
+    
+    return result;
+  }, [historicalRankings, currentRankings, showFullHistory]);
 
   const handleLogin = async () => {
     try {
@@ -1052,7 +1061,15 @@ export default function App() {
                       <Activity className="text-blue-400" />
                       <h2 className="text-xl font-bold text-white">순위 변동 추이</h2>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {typeof window !== 'undefined' && window.innerWidth < 768 && chartData.length >= 10 && (
+                        <button 
+                          onClick={() => setShowFullHistory(!showFullHistory)}
+                          className="text-[10px] font-black px-2 py-1 rounded bg-blue-900/30 border border-blue-800 text-blue-400 hover:text-blue-300 transition-colors uppercase tracking-widest flex items-center gap-1"
+                        >
+                          {showFullHistory ? "최근 10일만 보기" : "전체 보기"}
+                        </button>
+                      )}
                       <button 
                         onClick={() => setVisibleTeams(visibleTeams.length === TEAMS.length ? [] : TEAMS.map(t => t.id))}
                         className="text-[10px] font-black px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white transition-colors uppercase tracking-widest"
